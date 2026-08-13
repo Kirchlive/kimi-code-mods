@@ -6,3 +6,7 @@ baseline/
 system-prompts.*.new/
 state.json
 .DS_Store
+
+# Python bytecode from the lib/ helpers.
+__pycache__/
+*.pyc

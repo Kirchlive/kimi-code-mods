@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# tweakkimi launcher — applies the environment profile, then hands over to Kimi.
+#
+# Kimi's most useful display and context switches exist only as environment
+# variables. There is no configuration path to them: the transcript window is
+# read with `readEnvInt("KIMI_CODE_TUI_MAX_TURNS", 15)` and the key
+# `transcriptWindow` appears nowhere in the bundle. A setting that has to be
+# exported by hand before every start is a setting nobody keeps, so this
+# wrapper reads `env-profile.conf` and exports what it finds there.
+#
+# Only names on the allow-list below are exported. That is deliberate: of the
+# 170 `KIMI*` strings in the bundle, fewer than a third are ever read from the
+# environment, and a profile that happily accepts
+# `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` would promise an effect that does not
+# exist. A typo is reported rather than silently ignored.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROFILE="${TWEAKKIMI_PROFILE:-$HERE/env-profile.conf}"
+REAL_BIN="${TWEAKKIMI_REAL_BIN:-$HOME/.kimi-code/bin/kimi}"
+
+# Environment variables Kimi 0.36.0 genuinely reads. Verified against the
+# bundle: each one appears at a `process.env` / `getEnv` / `readEnvInt` read
+# site, not merely as a string. Secrets are deliberately absent — an API key
+# belongs in the keychain or the shell, not in a plain-text profile committed
+# to a git repository.
+KNOWN_VARS="
+KIMI_CODE_TUI_FULL_SCREEN
+KIMI_CODE_TUI_MAX_TURNS
+KIMI_CODE_TUI_EXPAND_TURNS
+KIMI_CODE_TUI_HYSTERESIS
+KIMI_CODE_TUI_KEEP_RECENT_STEPS
+KIMI_CODE_TUI_KEEP_RECENT_ASSISTANT
+KIMI_CODE_TUI_KEEP_RECENT_ASSISTANT_COMPLETED
+KIMI_CODE_NO_AUTO_UPDATE
+KIMI_CLI_NO_AUTO_UPDATE
+KIMI_CODE_BUILTIN_PRODUCT_SKILLS
+KIMI_CODE_EXPERIMENTAL_FLAG
+KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL
+KIMI_CODE_EXPERIMENTAL_TOOL_SELECT
+KIMI_CODE_EXPERIMENTAL_SEARCH_WORKER
+KIMI_CODE_EXPERIMENTAL_PERSISTENCE_MINIDB_READMODEL
+KIMI_CODE_DEBUG
+KIMI_STARTUP_TRACE
+KIMI_STARTUP_TRACE_LOG
+KIMI_TUI_NO_RENDER_CACHE
+KIMI_TUI_INPUT_LATENCY
+KIMI_TUI_INPUT_LATENCY_LOG
+KIMI_CODE_HOME
+KIMI_PLUGIN_ROOT
+"
+
+is_known() {
+  case "$KNOWN_VARS" in *"
+$1
+"*) return 0 ;; *) return 1 ;; esac
+}
+
+die() { echo "tweakkimi launcher: $*" >&2; exit 78; }   # 78 = EX_CONFIG
+
+# --- refuse to launch ourselves ------------------------------------------
+# The whole point of this wrapper is to sit earlier in PATH than the real
+# binary, so resolving the target through PATH would find this script again and
+# fork-bomb the machine. The target is therefore always an absolute path, and
+# we additionally compare the resolved inodes: a profile or an env override
+# pointing back here is a configuration error, not something to survive at
+# runtime.
+resolve() {
+  if command -v realpath >/dev/null 2>&1; then realpath "$1" 2>/dev/null
+  else python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
+  fi
+}
+
+case "$REAL_BIN" in
+  /*) ;;
+  *) die "TWEAKKIMI_REAL_BIN must be an absolute path, got '$REAL_BIN'" ;;
+esac
+[ -x "$REAL_BIN" ] || die "no executable Kimi at $REAL_BIN"
+
+SELF="$(resolve "${BASH_SOURCE[0]}")"
+TARGET="$(resolve "$REAL_BIN")"
+[ "$SELF" != "$TARGET" ] || die "target resolves to this launcher — that would loop forever"
+
+# Second line of defence: if we somehow re-enter, hand over without reapplying.
+if [ -n "${TWEAKKIMI_LAUNCHED:-}" ]; then
+  exec "$REAL_BIN" "$@"
+fi
+export TWEAKKIMI_LAUNCHED=1
+
+# --- apply the profile ----------------------------------------------------
+# Parsed, never sourced: a profile should describe settings, not execute code.
+# Values are taken literally, so quotes are optional and no expansion happens.
+if [ -f "$PROFILE" ]; then
+  lineno=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    lineno=$((lineno + 1))
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -n "$line" ] || continue
+    case "$line" in
+      *=*) ;;
+      *) die "$PROFILE:$lineno: expected NAME=value, got '$line'" ;;
+    esac
+    name="${line%%=*}"
+    value="${line#*=}"
+    name="${name%"${name##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    # Strip one layer of surrounding quotes, if present.
+    case "$value" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    is_known "$name" \
+      || die "$PROFILE:$lineno: '$name' is not read by Kimi 0.36.0 — setting it would do nothing"
+    export "$name=$value"
+  done < "$PROFILE"
+fi
+
+exec "$REAL_BIN" "$@"

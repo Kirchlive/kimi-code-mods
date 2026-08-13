@@ -110,7 +110,14 @@ bash "$HERE/lib/test_guard.sh" >/dev/null 2>&1
 check $? 'guard suite (16 cases, sandboxed)'
 
 echo
+echo 'launcher:'
+bash "$HERE/lib/test_launcher.sh" >/dev/null 2>&1
+check $? 'launcher suite (18 cases, sandboxed)'
+
+echo
 echo 'companion tools:'
+python3 "$HERE/lib/config-menu.py" --selfcheck >/dev/null 2>&1
+check $? 'config-menu selfcheck'
 python3 "$HERE/lib/prompt-cost.py" --selfcheck >/dev/null 2>&1
 check $? 'prompt-cost selfcheck'
 python3 "$HERE/lib/migrate-prompts.py" --selfcheck >/dev/null 2>&1

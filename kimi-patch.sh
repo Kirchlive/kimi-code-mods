@@ -38,6 +38,8 @@ usage: $(basename "$0") [--restore] [--status] [--extract] [--extract-prompts] [
   --extract          dump the JavaScript bundle so you can search it for anchors
   --extract-prompts  (re-)extract the prompt files into system-prompts/
   --cost             what each prompt weighs, and what your edits have saved
+  --config-menu      edit the Kimi settings worth changing (writes config.toml)
+  --env              launcher profile: show/list/set/unset (environment-only settings)
   --tools            what each builtin tool description costs (see [tools] config)
   --migrate NEW      carry your overrides onto a freshly extracted tree
 
@@ -186,6 +188,12 @@ print(f"prompts   : {total} extracted, {edited} edited (applied on the next run)
     exit 0 ;;
   --cost)
     python3 "$HERE/lib/prompt-cost.py" "$PROMPT_DIR" "${@:2}"
+    exit $? ;;
+  --config-menu)
+    python3 "$HERE/lib/config-menu.py" "${@:2}"
+    exit $? ;;
+  --env)
+    bash "$HERE/lib/kimi-env.sh" "${@:2}"
     exit $? ;;
   --tools)
     [ -f "$WORK/bundle.js" ] || { mkdir -p "$WORK"

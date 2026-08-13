@@ -34,7 +34,10 @@ beobachtet · `offen` noch nicht gebaut.
 19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | wirkungslos
 20. Modell je Subagent          | built-in: Flag secondary-model            | schaltbar
 
-21. Interaktives CLI-Menü       | nicht gebaut                              | offen
+21. Interaktives CLI-Menü       | kimi-patch.sh --config-menu               | done
+26. Launcher für Env-Schalter   | bin/kimi + env-profile.conf, --env        | done
+27. Kommando-Vorschau 50 %      | patches/10-command-preview-half-height.js | done
+28. Zusätzliche Skill-Verzeichn.| built-in: extra_skill_dirs                | done
 22. System-Prompt kürzen        | Override system.plain.md, braucht Presets | offen
 23. Eingebaute Skills abschalten| built-in: builtinProductSkills=false      | done
 24. Profil-Presets              | Overrides für agent/coder/explore/plan    | offen
