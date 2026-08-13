@@ -34,7 +34,10 @@ beobachtet · `offen` noch nicht gebaut.
 19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | wirkungslos
 20. Modell je Subagent          | built-in: Flag secondary-model            | schaltbar
 
-21. Interaktives CLI-Menü       | kimi-patch.sh --config-menu               | done
+21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
+29. Haupt-CLI (Dach über allem) | ./tweakkimi.sh bzw. --menu                | done
+30. Cursor per Klick setzen     | verworfen: Maus erreicht keine Komponente | offen
+31. Arbeitsverzeichnis wechseln | /wd — Kern kann es, TUI-API fehlt         | offen
 26. Launcher für Env-Schalter   | bin/kimi + env-profile.conf, --env        | done
 27. Kommando-Vorschau 50 %      | patches/10-command-preview-half-height.js | done
 28. Zusätzliche Skill-Verzeichn.| built-in: extra_skill_dirs                | done
@@ -81,3 +84,28 @@ Redigieren mit Verhaltensfolgen und braucht kuratierte Presets, keinen Schalter.
 
 **23** — Bestätigt, indem Kimi mit und ohne das Flag nach seinen Skills gefragt
 wurde: aus drei wird einer.
+
+**30** — Untersucht und verworfen. Maus-Tracking ist im Alt-Screen aktiv,
+inklusive SGR-Encoding, und der Parser existiert. Die Ereignisse enden aber in
+einer geschlossenen Kette — Rechtsklick-Paste, Scrollbar, Hover, Textauswahl,
+dann `consume: true`. Einen Weg zu Komponenten gibt es nicht: `componentAt`,
+`getComponentsAt` und `hitTest` haben je null Treffer, und ein `handleMouse`
+als Gegenstück zu `handleInput` existiert nicht. Der Normalmodus enthält
+überhaupt keinen Maus-Code. Ein Patch müsste außerdem annehmen, dass
+`scrollOffset` (indexiert über `layoutText`) und die Cursor-Umrechnung
+(`buildVisualLineMap`) dieselbe Zeilenaufteilung liefern — zwei getrennte
+Implementierungen, statisch nicht entscheidbar. Interessant für später: jede
+Layout-Box führt bereits ein Feld `component`, das niemand liest.
+
+**31** — Untersucht und verworfen. Der Kern kann den Wechsel wirklich:
+`config.update({cwd})` setzt kaos neu und baut die Builtin-Tools neu auf, was
+nötig ist, weil `BashTool` sein `cwd` im Konstruktor festhält. Die TUI erreicht
+diesen Pfad aber nicht — ihre Session-API hat Setter für Modell, Thinking,
+Plan- und Permission-Modus, aber keinen für das Arbeitsverzeichnis, und
+`setAppState({workDir})` kommt im Bundle null mal vor. Dazu lesen über 16
+Stellen `appState.workDir`, mehrere davon einmalig bei der Konstruktion
+(@-Mentions, Input-History-Pfad, Plugin-Notifier). Sauber wäre nur ein Feature
+über die Schichtgrenze, kein Patch. Ehrlich machbar wäre stattdessen „neue
+Sitzung in einem anderen Verzeichnis" über `setAppState` plus
+`createNewSession()` — das verwirft allerdings die Unterhaltung und ist damit
+nicht das, was `/cd` in Claude Code tut.

@@ -599,7 +599,7 @@ def render(doc: TomlLines, path: Path):
     return data
 
 
-def interactive(path: Path, dry_run: bool) -> int:
+def interactive(path: Path, dry_run: bool, first: str = '') -> int:
     original = path.read_text() if path.exists() else ''
     doc = TomlLines(original)
 
@@ -608,9 +608,17 @@ def interactive(path: Path, dry_run: bool) -> int:
     if doc.rename(S_LOOP, K_ATTEMPTS_OLD, K_ATTEMPTS):
         print(f'note: renamed {K_ATTEMPTS_OLD} to {K_ATTEMPTS} (deprecated spelling)')
 
+    # `--item N` jumps straight into one entry, so the top-level menu can offer
+    # "Tools" and "Permissions" as separate doors without duplicating anything
+    # behind them. Afterwards the normal loop takes over, which is what makes
+    # the write prompt still reachable.
     while True:
-        data = render(doc, path)
-        choice = ask('\n > ').lower()
+        if first:
+            choice, first = first, ''
+            data = tomllib.loads(doc.text())
+        else:
+            data = render(doc, path)
+            choice = ask('\n > ').lower()
         if choice == 'q':
             print('nothing written.')
             return 0
@@ -779,13 +787,16 @@ def main() -> int:
     if '--selfcheck' in args:
         return _selfcheck()
     path = CONFIG
+    first = ''
     for i, a in enumerate(args):
         if a == '--config' and i + 1 < len(args):
             path = Path(args[i + 1])
+        if a == '--item' and i + 1 < len(args):
+            first = args[i + 1].lower()
     if not path.exists():
         print(f'no config at {path}', file=sys.stderr)
         return 1
-    return interactive(path, '--dry-run' in args)
+    return interactive(path, '--dry-run' in args, first)
 
 
 if __name__ == '__main__':

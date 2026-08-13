@@ -189,6 +189,8 @@ print(f"prompts   : {total} extracted, {edited} edited (applied on the next run)
   --cost)
     python3 "$HERE/lib/prompt-cost.py" "$PROMPT_DIR" "${@:2}"
     exit $? ;;
+  --menu)
+    exec "$HERE/tweakkimi.sh" "${@:2}" ;;
   --config-menu)
     python3 "$HERE/lib/config-menu.py" "${@:2}"
     exit $? ;;
