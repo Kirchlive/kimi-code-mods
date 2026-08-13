@@ -125,27 +125,55 @@ if (js.split(classHit[1]).length - 1 !== 1) {
 
 const METHOD = `
 \t\t__tkClickCursor(event) {
+\t\t\tconst __tkDbg = typeof process !== "undefined" && process.env && process.env.TWEAKKIMI_CLICK_DEBUG === "1";
+\t\t\tconst __tkLog = (o) => { if (!__tkDbg) return; try {
+\t\t\t\tprocess.getBuiltinModule("fs").appendFileSync("/tmp/tweakkimi-click.log", JSON.stringify(o) + "\\n");
+\t\t\t} catch {} };
 \t\t\ttry {
-\t\t\t\tif (!this.currentLayout || (typeof this.hasOverlay === "function" && this.hasOverlay())) return false;
+\t\t\t\tif (!this.currentLayout || (typeof this.hasOverlay === "function" && this.hasOverlay())) {
+\t\t\t\t\t__tkLog({ bail: "no layout or overlay open", hasLayout: !!this.currentLayout });
+\t\t\t\t\treturn false;
+\t\t\t\t}
 \t\t\t\tlet box;
+\t\t\t\t// Every box whose rect contains the click, with the three traits we
+\t\t\t\t// test for. Without this the "not found" case says nothing about
+\t\t\t\t// whether the editor was missed, mis-shaped, or elsewhere entirely.
+\t\t\t\tconst __tkSeen = [];
 \t\t\t\tconst visit = (b) => {
 \t\t\t\t\tif (box || !b) return;
 \t\t\t\t\tconst c = b.component, r = b.rect;
-\t\t\t\t\tif (c && r && typeof c.buildVisualLineMap === "function" && typeof c.layoutText === "function"
-\t\t\t\t\t\t&& c.state && Array.isArray(c.state.lines)
-\t\t\t\t\t\t&& event.x >= r.x && event.x < r.x + r.width
-\t\t\t\t\t\t&& event.y >= r.y && event.y < r.y + r.height) { box = b; return; }
+\t\t\t\t\tconst inside = r && event.x >= r.x && event.x < r.x + r.width
+\t\t\t\t\t\t&& event.y >= r.y && event.y < r.y + r.height;
+\t\t\t\t\tif (__tkDbg && inside && __tkSeen.length < 12) __tkSeen.push({
+\t\t\t\t\t\tctor: c && c.constructor ? c.constructor.name : String(c),
+\t\t\t\t\t\tmap: !!(c && typeof c.buildVisualLineMap === "function"),
+\t\t\t\t\t\tlayout: !!(c && typeof c.layoutText === "function"),
+\t\t\t\t\t\tlines: !!(c && c.state && Array.isArray(c.state.lines)),
+\t\t\t\t\t\trect: r
+\t\t\t\t\t});
+\t\t\t\t\tif (c && inside && typeof c.buildVisualLineMap === "function" && typeof c.layoutText === "function"
+\t\t\t\t\t\t&& c.state && Array.isArray(c.state.lines)) { box = b; return; }
 \t\t\t\t\tconst kids = b.children || [];
 \t\t\t\t\tfor (let i = 0; i < kids.length; i++) visit(kids[i]);
 \t\t\t\t};
 \t\t\t\tvisit(this.currentLayout.root);
-\t\t\t\tif (!box) return false;
+\t\t\t\tif (!box) {
+\t\t\t\t\t__tkLog({ bail: "no editor box under the pointer", click: { x: event.x, y: event.y }, candidates: __tkSeen });
+\t\t\t\t\treturn false;
+\t\t\t\t}
 \t\t\t\tconst ed = box.component;
 \t\t\t\tconst row = event.y - box.rect.y;
-\t\t\t\tif (row < 1) return false;
+\t\t\t\tif (row < 1) {
+\t\t\t\t\t__tkLog({ bail: "click on the top border row", row: row, rect: box.rect, click: { x: event.x, y: event.y } });
+\t\t\t\t\treturn false;
+\t\t\t\t}
 \t\t\t\tconst vis = ed.buildVisualLineMap(ed.lastWidth);
 \t\t\t\tconst vl = vis[(ed.scrollOffset || 0) + (row - 1)];
-\t\t\t\tif (!vl) return false;
+\t\t\t\tif (!vl) {
+\t\t\t\t\t__tkLog({ bail: "no visual line at that row", row: row, scrollOffset: ed.scrollOffset,
+\t\t\t\t\t\tlastWidth: ed.lastWidth, visualLines: vis.length, rect: box.rect });
+\t\t\t\t\treturn false;
+\t\t\t\t}
 \t\t\t\tconst maxPad = Math.max(0, Math.floor((box.rect.width - 1) / 2));
 \t\t\t\tconst pad = Math.min(ed.paddingX || 0, maxPad);
 \t\t\t\tconst col = Math.max(0, Math.min(event.x - (box.rect.x + pad), vl.length));
