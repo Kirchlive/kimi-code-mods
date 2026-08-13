@@ -1,61 +1,61 @@
-# tweakkimi — feature list
+# tweakkimi — Funktionsliste
 
-One line per feature: `name | mechanism | status`. This is the menu a CLI
-would be built from, so the order is the order a user meets them in.
+Eine Zeile je Funktion: `Name | Mechanismus | Status`. Daraus lässt sich das
+Menü eines CLI bauen, deshalb die Reihenfolge, in der man den Funktionen
+begegnet.
 
-Scope: things tweakkimi patches or unlocks. Kimi's own built-in surface lives
-in `FINDINGS.md` and is only listed here where the payoff is large enough to
-belong in the menu — those lines are marked `built-in`.
+Aufgenommen wird, was tweakkimi patcht oder freischaltet. Kimis eigene
+Oberfläche steht in `FINDINGS.md` und taucht hier nur auf, wo der Gewinn groß
+genug für einen Menüeintrag ist — diese Zeilen sind mit `built-in` markiert.
 
-Status: `done` verified working · `untested` built but not observed live ·
-`todo` not built yet.
+Status: `done` im Betrieb bestätigt · `ungetestet` gebaut, aber nicht live
+beobachtet · `offen` noch nicht gebaut.
 
 ```
- 1. fetch system prompts        | lib/extract-prompts.py                    | done
- 2. replace system prompts      | lib/apply-prompt-overrides.py             | done
- 3. extract JS bundle           | lib/sea.py extract                        | done
- 4. repack + resign binary      | lib/sea.py repack/sign, install_binary()  | done
- 5. freeze pristine baseline    | baseline/kimi-<version>                   | done
- 6. restore pristine binary     | kimi-patch.sh --restore                   | done
- 7. run javascript patches      | lib/run-patches.mjs, patches/*.js         | done
- 8. show patch state            | kimi-patch.sh --status                    | done
- 9. prompt cost report          | lib/prompt-cost.py                        | done
-10. tool cost report            | lib/list-tools.py                         | done
-11. migrate overrides on update | lib/migrate-prompts.py                    | done
-12. auto-repatch after update   | lib/kimi-guard.sh + launchd               | untested
-13. ignore/delete os files      | lib/os-cruft.txt                          | done
-14. test suite                  | test.sh, test.sh --full                   | done
-15. example patch (banner)      | patches/00-banner.js                      | done
+ 1. System-Prompts auslesen     | lib/extract-prompts.py                    | done
+ 2. System-Prompts ersetzen     | lib/apply-prompt-overrides.py             | done
+ 3. JS-Bundle extrahieren       | lib/sea.py extract                        | done
+ 4. Binary packen + signieren   | lib/sea.py repack/sign, install_binary()  | done
+ 5. Baseline einfrieren         | baseline/kimi-<version>                   | done
+ 6. Original wiederherstellen   | kimi-patch.sh --restore                   | done
+ 7. JavaScript-Patches anwenden | lib/run-patches.mjs, patches/*.js         | done
+ 8. Patch-Zustand anzeigen      | kimi-patch.sh --status                    | done
+ 9. Prompt-Kosten berichten     | lib/prompt-cost.py                        | done
+10. Werkzeug-Kosten berichten   | lib/list-tools.py                         | done
+11. Overrides mitmigrieren      | lib/migrate-prompts.py                    | done
+12. Nach Update neu patchen     | lib/kimi-guard.sh + launchd               | ungetestet
+13. Systemdateien fernhalten    | lib/os-cruft.txt                          | done
+14. Testsuite                   | test.sh, test.sh --full                   | done
+15. Beispiel-Patch (Banner)     | patches/00-banner.js                      | done
 
-16. disable builtin tools       | built-in: [tools] disabled in config.toml | untested
-17. fullscreen renderer         | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | untested
-18. shrink transcript window    | built-in: KIMI_CODE_TUI_MAX_TURNS et al.  | todo
-19. shell hooks on 20 events    | built-in: [hooks] in config.toml          | untested
-20. per-subagent model          | built-in: flag secondary-model            | untested
+16. Eingebaute Tools abschalten | built-in: [tools] disabled in config.toml | ungetestet
+17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | ungetestet
+18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_MAX_TURNS u. a.   | offen
+19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | ungetestet
+20. Modell je Subagent          | built-in: Flag secondary-model            | ungetestet
 
-21. interactive cli menu        | not built                                 | todo
-22. trim the system prompt      | override system.plain.md, needs presets   | todo
-23. disable builtin skills      | built-in: builtinProductSkills=false      | done
-24. profile switch presets      | agent/coder/explore/plan overrides        | todo
-25. publish/share a preset      | export a prompt tree as a diff bundle     | todo
+21. Interaktives CLI-Menü       | nicht gebaut                              | offen
+22. System-Prompt kürzen        | Override system.plain.md, braucht Presets | offen
+23. Eingebaute Skills abschalten| built-in: builtinProductSkills=false      | done
+24. Profil-Presets              | Overrides für agent/coder/explore/plan    | offen
+25. Preset teilen               | Prompt-Baum als Diff-Bündel exportieren   | offen
 ```
 
-## Notes on the non-obvious lines
+## Anmerkungen zu den nicht offensichtlichen Zeilen
 
-**12** — the guard is built and has 16 passing tests, but the launchd agent has
-never been installed, so no real auto-update has been survived yet.
+**12** — Der Wächter ist gebaut und hat 16 grüne Tests, aber der launchd-Agent
+wurde nie installiert. Ein echtes Auto-Update hat er also noch nicht überstanden.
 
-**16** — the config parses and `kimi doctor` accepts it; a live request with a
-shortened tool array has not been observed. Cron and Goal together are about
-4,900 tokens per turn.
+**16** — Die Konfiguration wird geparst und `kimi doctor` akzeptiert sie; eine
+echte Anfrage mit verkürztem Werkzeugkatalog habe ich nicht mitgelesen. Cron
+und Goal zusammen sind rund 4.900 Token pro Turn.
 
-**18** — the five `KIMI_CODE_TUI_*` variables decide how much history is re-sent
-每 turn. This is the only lever that lowers the *running* cost rather than the
-start cost, which is why it is worth a menu entry despite being built in.
+**18** — Die fünf `KIMI_CODE_TUI_*`-Variablen entscheiden, wie viel Historie je
+Turn erneut gesendet wird. Das ist der einzige Hebel, der die **laufenden**
+Kosten senkt statt der Startkosten — deshalb trotz `built-in` ein Menüeintrag.
 
-**22** — the live system prompt is 52,386 characters. Trimming it is real
-editing with behavioural consequences, so it needs curated presets rather than
-a switch.
+**22** — Der aktive System-Prompt hat 52.386 Zeichen. Ihn zu kürzen ist echtes
+Redigieren mit Verhaltensfolgen und braucht kuratierte Presets, keinen Schalter.
 
-**23** — verified by asking Kimi to list its skills with and without the flag:
-three become one.
+**23** — Bestätigt, indem Kimi mit und ohne das Flag nach seinen Skills gefragt
+wurde: aus drei wird einer.
