@@ -72,6 +72,19 @@ const edits = [
     build: (m) => m[1] + half(m[3]),
   },
   {
+    name: 'live tool output block (hard-coded override in tool-call.ts)',
+    // this.addChild(new ShellExecutionComponent({ …, resultPreviewLines: 3, … }))
+    //
+    // This one is why the first version of this patch looked like it did
+    // nothing on a running tool. `ShellExecutionComponent` falls back to
+    // `PREVIEW_LINES` only when the option is absent — here it is passed
+    // explicitly, so `??` never fires and the patched default is bypassed.
+    // Anchored together with `tailOutput` so it cannot hit some other literal
+    // three elsewhere in the file.
+    find: /(resultPreviewLines:\s*)(\d+)(,\s*tailOutput:)/,
+    build: (m) => m[1] + half(m[2]) + m[3],
+  },
+  {
     name: 'live progress box (appendProgress loop)',
     // while (this.progressLines.length > ToolCallComponent.MAX_PROGRESS_LINES)
     // Anchored on the `while` so the {@link ...} mention in the JSDoc above it
