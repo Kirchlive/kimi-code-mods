@@ -40,6 +40,7 @@ beobachtet · `offen` noch nicht gebaut.
 31. Arbeitsverzeichnis wechseln | /wd — Kern kann es, TUI-API fehlt         | offen
 26. Launcher für Env-Schalter   | bin/kimi + env-profile.conf, --env        | done
 27. Kommando-Vorschau 50 %      | patches/10-command-preview-half-height.js | done
+32. Vorschlagsliste-Höhe        | patches/20-…, suggestion_height in patch-settings.conf | done
 28. Zusätzliche Skill-Verzeichn.| built-in: extra_skill_dirs                | done
 22. System-Prompt kürzen        | Override system.plain.md, braucht Presets | offen
 23. Eingebaute Skills abschalten| built-in: builtinProductSkills=false      | done
