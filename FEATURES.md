@@ -28,11 +28,11 @@ beobachtet · `offen` noch nicht gebaut.
 14. Testsuite                   | test.sh, test.sh --full                   | done
 15. Beispiel-Patch (Banner)     | patches/00-banner.js                      | done
 
-16. Eingebaute Tools abschalten | built-in: [tools] disabled in config.toml | ungetestet
-17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | ungetestet
+16. Eingebaute Tools abschalten | built-in: [tools] disabled in config.toml | done
+17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | done
 18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_MAX_TURNS u. a.   | offen
-19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | ungetestet
-20. Modell je Subagent          | built-in: Flag secondary-model            | ungetestet
+19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | wirkungslos
+20. Modell je Subagent          | built-in: Flag secondary-model            | schaltbar
 
 21. Interaktives CLI-Menü       | nicht gebaut                              | offen
 22. System-Prompt kürzen        | Override system.plain.md, braucht Presets | offen
@@ -46,9 +46,28 @@ beobachtet · `offen` noch nicht gebaut.
 **12** — Der Wächter ist gebaut und hat 16 grüne Tests, aber der launchd-Agent
 wurde nie installiert. Ein echtes Auto-Update hat er also noch nicht überstanden.
 
-**16** — Die Konfiguration wird geparst und `kimi doctor` akzeptiert sie; eine
-echte Anfrage mit verkürztem Werkzeugkatalog habe ich nicht mitgelesen. Cron
-und Goal zusammen sind rund 4.900 Token pro Turn.
+**16** — Live bestätigt am 2026-08-13: mit
+`disabled = ["CronCreate","CronList","CronDelete"]` antwortet Kimi auf die
+Frage nach diesen Werkzeugen mit `NO` und zählt **23 statt 26** Werkzeuge. Die
+Sektion erreicht also den Katalog, den das Modell sieht. Cron und Goal zusammen
+sind rund 4.900 Token pro Turn.
+
+**17** — Live bestätigt: `KIMI_CODE_TUI_FULL_SCREEN=1 kimi` übernimmt den
+Bildschirm vollständig (Alternate-Screen-Buffer), die Shell-Historie darüber
+verschwindet für die Dauer der Sitzung.
+
+**19** — **Implementiert, aber wirkungslos.** Die Sektion ist ein Array
+(`HooksConfigSchema = array(HookDefSchema)`), also ist `[[hooks]]` das richtige
+TOML, das Schema ist `.strict()` und `kimi doctor` akzeptiert die Einträge; der
+Service liest sie in `load()` und indiziert nach Event. Trotzdem feuerte in
+0.36.0 weder `SessionStart` noch `PermissionRequest` noch `PreToolUse` — das
+Testkommando schrieb keine einzige Zeile. In den Logs steht dazu nichts.
+Warum, ist offen; bis dahin nicht darauf verlassen.
+
+**20** — `/experiments` listet alle vier Flags mit Beschreibung, Quelle
+(`default`) und Env-Namen und lässt sie umschalten. Dass ein zweites Modell
+für Subagenten dann tatsächlich verwendet wird, ist damit noch nicht gezeigt —
+dafür müsste ein Zweitmodell konfiguriert und ein Subagent beobachtet werden.
 
 **18** — Die fünf `KIMI_CODE_TUI_*`-Variablen entscheiden, wie viel Historie je
 Turn erneut gesendet wird. Das ist der einzige Hebel, der die **laufenden**
