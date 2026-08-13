@@ -33,6 +33,41 @@
 // which is the closest existing analogue (it also takes a path and also
 // confirms through a picker).
 
+// ------------------------------------------------------------------ settings
+//
+// Off by default. Set `wd_command = on` in `patch-settings.conf`, or pick it in
+// the menu. The default has to match `lib/patch_settings.py`, which registers
+// the same key — otherwise the menu reports a state the patch does not honour,
+// which is exactly what happened before this block existed: the entry read
+// `off` while the command was being compiled in regardless.
+
+let enabled = false;
+const getModule = typeof process !== 'undefined' && process.getBuiltinModule;
+if (getModule) {
+  try {
+    const fs = process.getBuiltinModule('fs');
+    const path = process.getBuiltinModule('path');
+    const patchDir = process.argv[4];
+    if (patchDir) {
+      const conf = path.join(path.dirname(path.resolve(patchDir)), 'patch-settings.conf');
+      if (fs.existsSync(conf)) {
+        for (const line of fs.readFileSync(conf, 'utf8').split('\n')) {
+          const m = /^\s*wd_command\s*=\s*([^#\s]+)/.exec(line.replace(/#.*/, ''));
+          if (m) enabled = /^(on|true|1|yes)$/i.test(m[1].trim());
+        }
+      }
+    }
+  } catch {
+    // An unreadable settings file must not fail the run, and must not add a
+    // command the user never asked for.
+    enabled = false;
+  }
+}
+
+if (!enabled) {
+  throw new Error('already patched');
+}
+
 if (js.includes('handleWdCommand')) {
   throw new Error('already patched');
 }
