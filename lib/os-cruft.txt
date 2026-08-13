@@ -1,0 +1,39 @@
+# Operating-system files that must never be treated as input.
+#
+# One glob per line, matched against the file name only, case-insensitively.
+# This is the single source of truth: kimi-patch.sh, run-patches.mjs and
+# apply-prompt-overrides.py all read this file, so a pattern added here takes
+# effect everywhere at once.
+#
+# Two of these bite in practice rather than in theory:
+#   ._*        macOS AppleDouble sidecars. `._system.md` sits next to
+#              `system.md` and would be read as a prompt with a corrupt
+#              header; `._fix.js` in patches/ would be executed as a patch.
+#   .DS_Store  makes an otherwise empty directory look occupied, which is
+#              enough to divert a first-time extraction into a .new tree.
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.fseventsd
+.apdisk
+.VolumeIcon.icns
+.localized
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN
+
+# Linux
+.directory
+.Trash-*
+.nfs*

@@ -1,0 +1,8 @@
+# Pristine binaries, 180 MB each — reproducible from a Kimi install.
+baseline/
+# Scratch space for extraction and repacking.
+.work/
+# Re-extraction output waiting to be merged into system-prompts/.
+system-prompts.*.new/
+state.json
+.DS_Store
