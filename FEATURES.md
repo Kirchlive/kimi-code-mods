@@ -37,7 +37,7 @@ beobachtet · `offen` noch nicht gebaut.
 21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
 29. Haupt-CLI (Dach über allem) | ./tweakkimi.sh bzw. --menu                | done
 30. Cursor per Klick setzen     | verworfen: Maus erreicht keine Komponente | offen
-31. Arbeitsverzeichnis wechseln | /wd — Kern kann es, TUI-API fehlt         | offen
+31. Arbeitsverzeichnis wechseln | patches/30-wd-command.js (neue Sitzung)   | done
 26. Launcher für Env-Schalter   | bin/kimi + env-profile.conf, --env        | done
 27. Kommando-Vorschau 50 %      | patches/10-command-preview-half-height.js | done
 32. Vorschlagsliste-Höhe        | patches/20-…, suggestion_height in patch-settings.conf | done
@@ -98,7 +98,24 @@ als Gegenstück zu `handleInput` existiert nicht. Der Normalmodus enthält
 Implementierungen, statisch nicht entscheidbar. Interessant für später: jede
 Layout-Box führt bereits ein Feld `component`, das niemand liest.
 
-**31** — Untersucht und verworfen. Der Kern kann den Wechsel wirklich:
+**31** — Umgesetzt, aber als **neue Sitzung im Zielverzeichnis**, nicht als
+Wechsel der laufenden. Der Grund steht unten: Weg A ist nicht schwierig,
+sondern verschlossen — `.config.update(` hat in `src/tui` null Treffer, und die
+Session-Fassade der Oberfläche bietet Setter für Modell, Berechtigung und
+Planmodus, aber keinen fürs Arbeitsverzeichnis. Statt eine Paketgrenze zu
+durchbrechen, setzt `/wd` `appState.workDir` und ruft `createNewSession()` —
+alles wird konsistent neu aufgebaut, weil nichts Altes überlebt. Preis: Die
+Unterhaltung geht verloren, deshalb fragt das Kommando vorher nach und heißt in
+der Beschreibung „start a new session in another working directory".
+
+Laufzeitbelegt sind alle drei Prüfungen: Statuszeile, `!pwd` und ein
+Datei-Werkzeug landen im neuen Verzeichnis. Der dritte Punkt ist der
+aussagekräftigste — eine Datei wurde **relativ** gelesen und gefunden, was nur
+geht, wenn die Werkzeuge tatsächlich gegen das neue Verzeichnis aufgebaut
+wurden. `/wd ~` löst auf, `/wd /nonexistent` lehnt ab, ohne die Sitzung zu
+beschädigen, `/wd` ohne Argument zeigt das aktuelle Verzeichnis.
+
+Zur ursprünglichen Absage, die weiterhin gilt:
 `config.update({cwd})` setzt kaos neu und baut die Builtin-Tools neu auf, was
 nötig ist, weil `BashTool` sein `cwd` im Konstruktor festhält. Die TUI erreicht
 diesen Pfad aber nicht — ihre Session-API hat Setter für Modell, Thinking,
