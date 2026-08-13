@@ -118,6 +118,15 @@ echo
 echo 'companion tools:'
 python3 "$HERE/lib/config-menu.py" --selfcheck >/dev/null 2>&1
 check $? 'config-menu selfcheck'
+python3 "$HERE/lib/keyreader.py" >/dev/null 2>&1
+check $? 'keyreader selfcheck (arrow-key decoding)'
+python3 "$HERE/lib/patch_settings.py" >/dev/null 2>&1
+check $? 'patch_settings selfcheck'
+python3 "$HERE/lib/main-menu.py" --selfcheck >/dev/null 2>&1
+check $? 'main-menu selfcheck (state, navigation, cycling)'
+# The menu must not spin when there is no terminal: it prints once and exits.
+python3 "$HERE/lib/main-menu.py" </dev/null >/dev/null 2>&1
+check $? 'menu falls back cleanly without a TTY'
 python3 "$HERE/lib/prompt-cost.py" --selfcheck >/dev/null 2>&1
 check $? 'prompt-cost selfcheck'
 python3 "$HERE/lib/migrate-prompts.py" --selfcheck >/dev/null 2>&1
