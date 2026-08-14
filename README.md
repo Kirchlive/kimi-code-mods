@@ -354,3 +354,25 @@ stands in for the binary wherever a real Mach-O is not required. Your
 `--full` additionally runs `lib/sea.py selfcheck`, which round-trips the
 payload through identity, shrink and grow, and verifies that extracting all 117
 prompts and re-applying them reproduces the bundle byte for byte.
+
+### Mouse
+
+The menu takes clicks as well as keys. Clicking a row selects *and* opens it —
+a row is a button, and making it select first would be a keyboard habit
+imposed on a pointer. On a `‹›` row a click advances the value, exactly as the
+arrow keys do. The header, the banner and the separators are inert: guessing
+what a stray click meant is worse than doing nothing. The wheel moves the
+selection.
+
+Nothing about the keyboard changed. Where the mouse is unavailable — a
+terminal that does not report, tmux without `set -g mouse on`, stdout
+redirected — the menu simply stays keyboard-driven, with no warning and no
+wait.
+
+Tracking is switched on and off around each keystroke, inside the same
+`try/finally` that saves and restores the terminal attributes. That is
+deliberate on two counts: a terminal left in tracking mode writes escape
+sequences into the shell on every pointer movement, which the user has no
+obvious way to stop; and anything an entry runs — the TOML editor,
+`kimi-patch.sh`, your `$EDITOR` — gets a clean terminal rather than a stream
+of mouse reports in its stdin. `MOUSE-CLICK.md` has the background.

@@ -1,15 +1,22 @@
-"""Single-keystroke input for the menu, including the arrow keys.
+"""Single-keystroke input for the menu, including the arrow keys and the mouse.
 
 Reading one key at a time means leaving the terminal's cooked mode, and a
 program that does that owes the user one guarantee above all: the terminal is
 handed back exactly as it was found, whatever happens in between. Every path
 out of `raw_mode` — normal return, exception, Ctrl-C, a `sys.exit` from deeper
-in the menu — restores the saved attributes in a `finally`.
+in the menu — restores the saved attributes in a `finally`. Mouse tracking is
+switched off in that same `finally`, for the same reason and with more at
+stake: a terminal left in tracking mode spits escape sequences into the shell
+on every pointer movement, and the user has no obvious way to stop it.
 
 Arrow keys arrive as escape sequences (`ESC [ A`), which is the same byte that
 starts a bare Escape press. They are told apart by waiting a few milliseconds
 for a follow-up byte: a real arrow key sends its whole sequence at once, a
 human pressing Escape does not.
+
+Mouse reports arrive in the same shape and are decoded into a `Mouse` object
+rather than a key name, so callers can tell a click from a keypress without
+parsing anything themselves.
 
 Nothing here requires a terminal to be *tested*: `read_key` takes any object
 with `read(n)` and a `fileno`, and `FakeKeys` supplies a scripted sequence, so
@@ -17,6 +24,7 @@ the menu's navigation can be exercised in a self-check with no TTY at all.
 """
 
 import os
+import re
 import select
 import sys
 from contextlib import contextmanager
@@ -36,22 +44,104 @@ ESC_TIMEOUT = 0.05
 ARROWS = {'A': 'up', 'B': 'down', 'C': 'right', 'D': 'left',
           'H': 'home', 'F': 'end'}
 
+# `?1000` reports button presses and releases only — no motion, which is all a
+# menu needs and the quietest thing to ask a terminal for. `?1006` switches the
+# reports to SGR encoding; without it columns past 223 are unreportable,
+# because the legacy format packs each coordinate into a single byte.
+MOUSE_ON = '\x1b[?1000h\x1b[?1006h'
+MOUSE_OFF = '\x1b[?1006l\x1b[?1000l'
+
+# ESC [ < button ; column ; row (M press | m release)
+SGR_REPORT = re.compile(r'^<(\d+);(\d+);(\d+)([Mm])$')
+
+
+class Mouse:
+    """A decoded mouse report.
+
+    `row` and `col` are **zero-based**, converted from the one-based numbers
+    the terminal sends, because every consumer here indexes a list of rendered
+    lines and an off-by-one there is invisible until someone clicks the wrong
+    row.
+    """
+
+    __slots__ = ('button', 'col', 'row', 'pressed')
+
+    def __init__(self, button: int, col: int, row: int, pressed: bool):
+        self.button = button
+        self.col = col
+        self.row = row
+        self.pressed = pressed
+
+    # Bits 2-4 of the button code carry shift, meta and ctrl; bit 6 marks a
+    # wheel event. The plain button number is therefore the low two bits.
+    @property
+    def is_wheel(self) -> bool:
+        return bool(self.button & 64)
+
+    @property
+    def wheel_up(self) -> bool:
+        return self.is_wheel and (self.button & 3) == 0
+
+    @property
+    def wheel_down(self) -> bool:
+        return self.is_wheel and (self.button & 3) == 1
+
+    @property
+    def is_left(self) -> bool:
+        return not self.is_wheel and (self.button & 3) == 0
+
+    def __repr__(self) -> str:               # pragma: no cover - diagnostics
+        return (f'Mouse(button={self.button}, col={self.col}, '
+                f'row={self.row}, pressed={self.pressed})')
+
+    def __eq__(self, other) -> bool:
+        return (isinstance(other, Mouse)
+                and (self.button, self.col, self.row, self.pressed)
+                == (other.button, other.col, other.row, other.pressed))
+
+
+def sgr(button: int, col: int, row: int, press: bool = False) -> str:
+    """The bytes a terminal would send for one report — for tests.
+
+    Takes zero-based coordinates and emits the one-based wire form, so a test
+    can be written in the same numbers the menu thinks in.
+    """
+    return f'\x1b[<{button};{col + 1};{row + 1}{"M" if press else "m"}'
+
 
 @contextmanager
-def raw_mode(stream=None):
-    """Put the terminal in cbreak mode for the duration of the block."""
+def raw_mode(stream=None, mouse: bool = False):
+    """Put the terminal in cbreak mode, optionally reporting mouse clicks.
+
+    Tracking is enabled and disabled inside the same try/finally as the
+    terminal attributes, so there is exactly one place where the terminal is
+    handed back and no way to leave tracking on by taking an unexpected exit.
+    The attribute restore runs last and unconditionally: even if writing the
+    disable sequence fails, the shell gets its echo back.
+    """
     stream = stream or sys.stdin
     if not HAVE_TERMIOS or not stream.isatty():
         yield False
         return
     fd = stream.fileno()
     saved = termios.tcgetattr(fd)
+    # Only ask for reports when they can actually be written somewhere the
+    # terminal will read them; with stdout redirected the codes would land in
+    # the pipe instead.
+    tracking = bool(mouse) and sys.stdout.isatty()
     try:
         tty.setcbreak(fd)
+        if tracking:
+            sys.stdout.write(MOUSE_ON)
+            sys.stdout.flush()
         yield True
     finally:
-        # Unconditional: an exception, Ctrl-C or SystemExit must not leave the
-        # shell without echo.
+        if tracking:
+            try:
+                sys.stdout.write(MOUSE_OFF)
+                sys.stdout.flush()
+            except Exception:               # pragma: no cover - closed stdout
+                pass
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
@@ -72,50 +162,91 @@ def _waiting(stream, timeout=ESC_TIMEOUT) -> bool:
         return False
 
 
-def read_key(stream=None) -> str:
-    """One keypress, as a name.
-
-    Returns `up`, `down`, `left`, `right`, `home`, `end`, `enter`, `esc`,
-    `backspace`, `tab`, `ctrl-c`, `eof`, or the literal character.
-    """
-    stream = stream or sys.stdin
-    ch = stream.read(1)
-    if ch == '':
-        return 'eof'
-    if ch == '\x03':
-        return 'ctrl-c'
-    if ch in ('\r', '\n'):
-        return 'enter'
-    if ch == '\t':
-        return 'tab'
-    if ch in ('\x7f', '\b'):
-        return 'backspace'
-    if ch != '\x1b':
-        return ch
-
-    # An escape byte: arrow key, or the Escape key on its own.
-    if not _waiting(stream):
-        return 'esc'
-    nxt = stream.read(1)
-    if nxt not in ('[', 'O'):
-        return 'esc'
+def _read_sequence(stream) -> str:
+    """The body of an escape sequence, after the introducing `[` or `O`."""
     seq = ''
     while True:
         c = stream.read(1)
         if c == '':
             break
         seq += c
-        if c.isalpha() or c == '~':
+        if seq[0] == '<':
+            # A mouse report ends in M or m and carries three numbers, so it
+            # is both longer than the ordinary sequences and differently
+            # terminated. `<64;1024;768M` is 13 characters.
+            if c in ('M', 'm') or len(seq) > 24:
+                break
+        elif c.isalpha() or c == '~' or len(seq) > 8:
             break
-        if len(seq) > 8:                    # malformed; give up rather than spin
-            break
-    if seq and seq[-1] in ARROWS:
-        return ARROWS[seq[-1]]
-    if seq == '5~':
-        return 'pageup'
-    if seq == '6~':
-        return 'pagedown'
-    return 'esc'
+    return seq
+
+
+def _parse_sgr(seq: str):
+    m = SGR_REPORT.match(seq)
+    if not m:
+        return None
+    button, col, row, final = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
+    return Mouse(button, col - 1, row - 1, final == 'M')
+
+
+def read_key(stream=None):
+    """One keypress or mouse click.
+
+    Returns `up`, `down`, `left`, `right`, `home`, `end`, `enter`, `esc`,
+    `backspace`, `tab`, `ctrl-c`, `eof`, the literal character — or a `Mouse`
+    for a click or a wheel step.
+
+    Clicks are reported on **release**. The press is swallowed, which keeps the
+    two halves of one click from arriving as two events, and a release on a
+    different row than the press is dropped as a drag rather than acted on.
+    """
+    stream = stream or sys.stdin
+    press_row = None
+    while True:
+        ch = stream.read(1)
+        if ch == '':
+            return 'eof'
+        if ch == '\x03':
+            return 'ctrl-c'
+        if ch in ('\r', '\n'):
+            return 'enter'
+        if ch == '\t':
+            return 'tab'
+        if ch in ('\x7f', '\b'):
+            return 'backspace'
+        if ch != '\x1b':
+            return ch
+
+        # An escape byte: arrow key, mouse report, or the Escape key on its own.
+        if not _waiting(stream):
+            return 'esc'
+        nxt = stream.read(1)
+        if nxt not in ('[', 'O'):
+            return 'esc'
+        seq = _read_sequence(stream)
+
+        if seq[:1] == '<':
+            ev = _parse_sgr(seq)
+            if ev is None:
+                continue                    # malformed; ignore rather than act
+            if ev.is_wheel:
+                return ev                   # the wheel sends no release
+            if ev.pressed:
+                press_row = ev.row
+                continue
+            if press_row is not None and press_row != ev.row:
+                press_row = None            # dragged across rows: not a click
+                continue
+            press_row = None
+            return ev
+
+        if seq and seq[-1] in ARROWS:
+            return ARROWS[seq[-1]]
+        if seq == '5~':
+            return 'pageup'
+        if seq == '6~':
+            return 'pagedown'
+        return 'esc'
 
 
 class FakeKeys:
@@ -123,7 +254,8 @@ class FakeKeys:
 
     Accepts key *names* (`'down'`) as well as raw characters, and turns them
     back into the bytes a terminal would send, so `read_key` itself is what is
-    being exercised rather than a stand-in for it.
+    being exercised rather than a stand-in for it. Mouse reports go in as raw
+    strings, most readably via `sgr()`.
     """
 
     ENCODE = {'up': '\x1b[A', 'down': '\x1b[B', 'right': '\x1b[C',
@@ -176,6 +308,53 @@ def _selfcheck() -> int:
     # raw_mode is a no-op on a non-tty and must not raise.
     with raw_mode(FakeKeys([])) as active:
         assert active is False
+    with raw_mode(FakeKeys([]), mouse=True) as active:
+        assert active is False
+
+    # -- mouse decoding ----------------------------------------------------
+
+    ev = read_key(FakeKeys([sgr(0, 9, 4)]))
+    assert isinstance(ev, Mouse), ev
+    assert (ev.col, ev.row, ev.pressed) == (9, 4, False), ev
+    assert ev.is_left and not ev.is_wheel
+
+    # Multi-digit coordinates survive the length guard that trims ordinary
+    # sequences at eight characters.
+    ev = read_key(FakeKeys([sgr(0, 119, 44)]))
+    assert (ev.col, ev.row) == (119, 44), ev
+
+    # Both terminators decode; the press half of a click is swallowed so one
+    # click is one event.
+    src = FakeKeys([sgr(0, 3, 7, press=True), sgr(0, 3, 7), 'q'])
+    ev = read_key(src)
+    assert isinstance(ev, Mouse) and ev.row == 7 and not ev.pressed, ev
+    assert read_key(src) == 'q'
+
+    # Pressing on one row and releasing on another is a drag, not a click.
+    src = FakeKeys([sgr(0, 3, 7, press=True), sgr(0, 3, 12), 'x'])
+    assert read_key(src) == 'x'
+
+    # The wheel has no release event, so it is reported as it arrives.
+    up = read_key(FakeKeys([sgr(64, 5, 5, press=True)]))
+    assert isinstance(up, Mouse) and up.wheel_up and not up.wheel_down, up
+    down = read_key(FakeKeys([sgr(65, 5, 5, press=True)]))
+    assert down.wheel_down and not down.wheel_up, down
+
+    # A modifier set alongside the button must not hide which button it was:
+    # 4 is shift, so 4 = shift+left.
+    shift_left = read_key(FakeKeys([sgr(4, 2, 2)]))
+    assert shift_left.is_left, shift_left
+
+    # Right and middle are distinguishable from left.
+    assert not read_key(FakeKeys([sgr(2, 2, 2)])).is_left
+
+    # A malformed report is skipped rather than mistaken for a key.
+    assert read_key(FakeKeys(['\x1b[<0;bogus;1m', 'k'])) == 'k'
+
+    # Keys and clicks interleave in one stream.
+    src = FakeKeys(['down', sgr(0, 1, 3), 'enter'])
+    got = [read_key(src) for _ in range(3)]
+    assert got[0] == 'down' and isinstance(got[1], Mouse) and got[2] == 'enter', got
 
     print('keyreader selfcheck: ok')
     return 0

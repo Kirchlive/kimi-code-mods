@@ -38,7 +38,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 
 import patch_settings as ps                                  # noqa: E402
-from keyreader import FakeKeys, raw_mode, read_key           # noqa: E402
+from keyreader import FakeKeys, Mouse, raw_mode, read_key, sgr  # noqa: E402
 from oscruft import is_os_cruft, usable_files                # noqa: E402
 
 PATCH_GLOB = '*.js'
@@ -380,7 +380,15 @@ def banner(st: State) -> list[str]:
     return out
 
 
-def render(st: State, items: list[Item], cursor: int) -> list[str]:
+def render(st: State, items: list[Item], cursor: int,
+           row_map: dict | None = None) -> list[str]:
+    """The menu as lines, optionally recording which line each entry landed on.
+
+    The mapping is built here rather than recomputed later, because here it is
+    free: the index of the line about to be appended is simply `len(lines)`.
+    Working it out afterwards would mean counting banner lines and separators a
+    second time, in a second place, with a second chance of drifting apart.
+    """
     lines = ['', 'tweakkimi',
              f'Kimi {st.version} — {st.binary_state}, {st.signature} signature']
     lines += banner(st)
@@ -398,6 +406,8 @@ def render(st: State, items: list[Item], cursor: int) -> list[str]:
         if note:
             value = f'{value}   [{note}]' if value else f'[{note}]'
         arrows = ' ‹›' if it.kind == 'cycle' else '   '
+        if row_map is not None:
+            row_map[len(lines)] = i
         lines.append(f' {mark} {n:>2}  {it.label:<26}{arrows} {value}')
 
     lines.append('')
@@ -405,15 +415,23 @@ def render(st: State, items: list[Item], cursor: int) -> list[str]:
     if sel is not None and sel.help:
         lines.append(f'   {sel.help}')
         lines.append('')
-    lines.append('   ↑↓ move · enter open · ‹› change · q quit')
+    lines.append('   ↑↓ or wheel move · enter or click open · ‹› change · q quit')
     return lines
 
 
-def draw(st: State, items: list[Item], cursor: int) -> None:
-    # Clear and home, so the menu redraws in place instead of scrolling away.
+def draw(st: State, items: list[Item], cursor: int) -> dict:
+    """Paint the menu and return the line-to-entry mapping for the mouse.
+
+    Clear-and-home puts the first line at screen row 0, which is what makes the
+    mapping usable directly: a click's zero-based row *is* an index into the
+    list that was just printed. That holds as long as the menu fits the window;
+    on a very short terminal the top scrolls away and clicks land one entry off.
+    """
     sys.stdout.write('\x1b[2J\x1b[H')
-    print('\n'.join(render(st, items, cursor)))
+    row_map: dict[int, int] = {}
+    print('\n'.join(render(st, items, cursor, row_map)))
     sys.stdout.flush()
+    return row_map
 
 
 # --------------------------------------------------------------------------
@@ -595,8 +613,39 @@ def move(items: list[Item], cursor: int, step: int) -> int:
     return cursor
 
 
-def handle(st: State, items: list[Item], cursor: int, key: str) -> tuple[int, bool, bool]:
-    """One keystroke. Returns (cursor, keep_running, needs_reload)."""
+def handle_mouse(st: State, items: list[Item], cursor: int,
+                 ev: Mouse, row_map: dict) -> tuple[int, bool, bool]:
+    """One click or wheel step. Same return shape as `handle`.
+
+    A click both selects and acts, because a menu row is a button: making it
+    select first and act on a second click would be a keyboard habit imposed on
+    a pointer. Anything that is not an entry — header, banner, separator, the
+    help line — is inert rather than treated as the nearest entry; guessing
+    what a stray click meant is worse than doing nothing.
+    """
+    if ev.wheel_up:
+        return move(items, cursor, -1), True, False
+    if ev.wheel_down:
+        return move(items, cursor, 1), True, False
+    if not ev.is_left:                      # middle and right have no meaning here
+        return cursor, True, False
+
+    idx = row_map.get(ev.row)
+    if idx is None or not (0 <= idx < len(items)) or not items[idx].selectable:
+        return cursor, True, False
+
+    item = items[idx]
+    if item.kind == 'cycle':
+        cycle_item(st, item, True)
+        return idx, True, True
+    return idx, activate(st, item), True
+
+
+def handle(st: State, items: list[Item], cursor: int, key,
+           row_map: dict | None = None) -> tuple[int, bool, bool]:
+    """One keystroke or click. Returns (cursor, keep_running, needs_reload)."""
+    if isinstance(key, Mouse):
+        return handle_mouse(st, items, cursor, key, row_map or {})
     if key in ('q', 'esc', 'ctrl-c', 'eof'):
         return cursor, False, False
     if key == 'up':
@@ -649,13 +698,16 @@ def interactive(root: Path) -> int:
         return 0
 
     while True:
-        draw(st, items, cursor)
-        # Raw mode wraps the keystroke only. Everything an entry may run —
-        # the TOML editor, kimi-patch.sh, an editor — reads lines from this
-        # same terminal, and cbreak mode would break their prompts.
-        with raw_mode():
+        row_map = draw(st, items, cursor)
+        # Raw mode and mouse tracking wrap the keystroke only. Everything an
+        # entry may run — the TOML editor, kimi-patch.sh, an editor — reads
+        # lines from this same terminal: cbreak mode would break their prompts,
+        # and tracking left on would feed them escape sequences every time the
+        # pointer moved. Switching both off between keystrokes costs a few
+        # bytes and removes a whole class of interference.
+        with raw_mode(mouse=True):
             key = read_key()
-        cursor, keep, reload_ = handle(st, items, cursor, key)
+        cursor, keep, reload_ = handle(st, items, cursor, key, row_map)
         if not keep:
             break
         if reload_:
@@ -829,6 +881,69 @@ def _selfcheck() -> int:
         src = FakeKeys(['down', 'down', 'up', 'enter', 'q'])
         seq = [read_key(src) for _ in range(5)]
         check('scripted keys decode', seq == ['down', 'down', 'up', 'enter', 'q'], seq)
+
+        # -- mouse ---------------------------------------------------------
+        # The mapping is built by the same pass that draws, so it can be
+        # checked against the drawn lines rather than against a second model.
+        row_map: dict[int, int] = {}
+        lines = render(st, items, first_selectable(items), row_map)
+        check('every entry is mapped',
+              len(row_map) == len([i for i in items if i.selectable]), len(row_map))
+        for line_no, item_idx in row_map.items():
+            check('mapped line holds its entry',
+                  items[item_idx].label in lines[line_no],
+                  f'line {line_no}: {lines[line_no]!r} vs {items[item_idx].label!r}')
+
+        # Lines that are not entries must not be in the mapping at all.
+        sep_lines = [n for n, l in enumerate(lines) if l.startswith('   ─')]
+        check('separators are unmapped', all(n not in row_map for n in sep_lines))
+        check('header is unmapped', 0 not in row_map and 1 not in row_map)
+
+        # A click on an entry selects it; on a cycle row it also advances the
+        # value, which is the one case that can be exercised without launching
+        # a subprocess.
+        settings.write_text('')
+        idx = next(i for i, it in enumerate(items) if it.key == 'suggestion_height')
+        line_no = next(n for n, i in row_map.items() if i == idx)
+        pos, keep, reload_ = handle(st, items, 0, Mouse(0, 5, line_no, False), row_map)
+        check('click selects the clicked row', pos == idx, pos)
+        check('click on a cycle row advances it',
+              ps.get('suggestion_height', settings) == 'half',
+              ps.get('suggestion_height', settings))
+        check('click asks for a reload', reload_ and keep)
+
+        # A click anywhere else is inert — it must not move the cursor and
+        # must not act.
+        before = ps.get('suggestion_height', settings)
+        for dead in (0, 1, sep_lines[0] if sep_lines else len(lines) - 1, len(lines) - 1):
+            pos2, keep2, reload2 = handle(st, items, idx, Mouse(0, 3, dead, False), row_map)
+            check(f'click on line {dead} does nothing',
+                  (pos2, keep2, reload2) == (idx, True, False), (pos2, keep2, reload2))
+        check('inert clicks changed no setting',
+              ps.get('suggestion_height', settings) == before)
+
+        # A click far below the menu maps to nothing.
+        pos3, _, _ = handle(st, items, idx, Mouse(0, 0, 999, False), row_map)
+        check('click past the end is inert', pos3 == idx)
+
+        # Buttons other than the left one are ignored.
+        pos4, _, reload4 = handle(st, items, idx, Mouse(2, 5, line_no, False), row_map)
+        check('right button ignored', pos4 == idx and not reload4)
+
+        # The wheel moves the selection without acting on anything.
+        start = first_selectable(items)
+        posw, _, reloadw = handle(st, items, start, Mouse(65, 0, 0, True), row_map)
+        check('wheel down moves', posw != start and not reloadw, posw)
+        posu, _, _ = handle(st, items, posw, Mouse(64, 0, 0, True), row_map)
+        check('wheel up moves back', posu == start, posu)
+
+        # End to end: the bytes a terminal sends for a click on that row are
+        # decoded and dispatched to the same entry.
+        settings.write_text('')
+        ev = read_key(FakeKeys([sgr(0, 5, line_no, press=True), sgr(0, 5, line_no)]))
+        check('click bytes decode to a Mouse', isinstance(ev, Mouse), ev)
+        pos5, _, _ = handle(st, items, 0, ev, row_map)
+        check('decoded click reaches the entry', pos5 == idx, pos5)
 
         # -- suggestion levels mirror the patch's arithmetic ---------------
         # The patch computes: half = min(floor(rows/2), max(1, rows-5)),
