@@ -134,65 +134,98 @@ const METHOD = `
 \t\t\t\t\t__tkLog({ bail: "no layout or overlay open", hasLayout: !!this.currentLayout });
 \t\t\t\t\treturn false;
 \t\t\t\t}
-\t\t\t\tlet box;
-\t\t\t\t// Every box whose rect contains the click, with the three traits we
-\t\t\t\t// test for. Without this the "not found" case says nothing about
-\t\t\t\t// whether the editor was missed, mis-shaped, or elsewhere entirely.
+\t\t\t\t// The editor gets no layout box of its own: GutterContainer renders
+\t\t\t\t// its children itself, so the deepest box under the pointer is the
+\t\t\t\t// container. Walk the component's own children to reach the editor.
+\t\t\t\tconst findEditor = (c) => {
+\t\t\t\t\tif (!c) return void 0;
+\t\t\t\t\tif (typeof c.buildVisualLineMap === "function" && typeof c.layoutText === "function"
+\t\t\t\t\t\t&& c.state && Array.isArray(c.state.lines)) return c;
+\t\t\t\t\tconst kids = c.children;
+\t\t\t\t\tif (Array.isArray(kids)) for (let i = 0; i < kids.length; i++) {
+\t\t\t\t\t\tconst f = findEditor(kids[i]);
+\t\t\t\t\t\tif (f) return f;
+\t\t\t\t\t}
+\t\t\t\t\treturn void 0;
+\t\t\t\t};
+\t\t\t\tlet box, ed, bestDepth = -1;
 \t\t\t\tconst __tkSeen = [];
-\t\t\t\tconst visit = (b) => {
-\t\t\t\t\tif (box || !b) return;
+\t\t\t\tconst visit = (b, depth) => {
+\t\t\t\t\tif (!b) return;
 \t\t\t\t\tconst c = b.component, r = b.rect;
 \t\t\t\t\tconst inside = r && event.x >= r.x && event.x < r.x + r.width
 \t\t\t\t\t\t&& event.y >= r.y && event.y < r.y + r.height;
-\t\t\t\t\tif (__tkDbg && inside && __tkSeen.length < 12) __tkSeen.push({
-\t\t\t\t\t\tctor: c && c.constructor ? c.constructor.name : String(c),
-\t\t\t\t\t\tmap: !!(c && typeof c.buildVisualLineMap === "function"),
-\t\t\t\t\t\tlayout: !!(c && typeof c.layoutText === "function"),
-\t\t\t\t\t\tlines: !!(c && c.state && Array.isArray(c.state.lines)),
-\t\t\t\t\t\trect: r
-\t\t\t\t\t});
-\t\t\t\t\tif (c && inside && typeof c.buildVisualLineMap === "function" && typeof c.layoutText === "function"
-\t\t\t\t\t\t&& c.state && Array.isArray(c.state.lines)) { box = b; return; }
+\t\t\t\t\tif (inside) {
+\t\t\t\t\t\tconst found = findEditor(c);
+\t\t\t\t\t\tif (__tkDbg && __tkSeen.length < 12) __tkSeen.push({
+\t\t\t\t\t\t\tctor: c && c.constructor ? c.constructor.name : String(c),
+\t\t\t\t\t\t\teditor: found && found.constructor ? found.constructor.name : null,
+\t\t\t\t\t\t\tkeys: c ? Object.keys(c).slice(0, 14) : void 0,
+\t\t\t\t\t\t\trect: r, depth: depth
+\t\t\t\t\t\t});
+\t\t\t\t\t\t// Ancestors match too - keep the deepest, which is the container.
+\t\t\t\t\t\tif (found && depth > bestDepth) { box = b; ed = found; bestDepth = depth; }
+\t\t\t\t\t}
 \t\t\t\t\tconst kids = b.children || [];
-\t\t\t\t\tfor (let i = 0; i < kids.length; i++) visit(kids[i]);
+\t\t\t\t\tfor (let i = 0; i < kids.length; i++) visit(kids[i], depth + 1);
 \t\t\t\t};
-\t\t\t\tvisit(this.currentLayout.root);
+\t\t\t\tvisit(this.currentLayout.root, 0);
 \t\t\t\tif (!box) {
-\t\t\t\t\t__tkLog({ bail: "no editor box under the pointer", click: { x: event.x, y: event.y }, candidates: __tkSeen });
+\t\t\t\t\t__tkLog({ bail: "no editor under the pointer", click: { x: event.x, y: event.y }, candidates: __tkSeen });
 \t\t\t\t\treturn false;
 \t\t\t\t}
-\t\t\t\tconst ed = box.component;
-\t\t\t\tconst row = event.y - box.rect.y;
+\t\t\t\tconst holder = box.component;
+\t\t\t\tconst leftPad = holder && typeof holder.leftPad === "number" ? holder.leftPad : 0;
+\t\t\t\tconst rightPad = holder && typeof holder.rightPad === "number" ? holder.rightPad : 0;
+\t\t\t\tconst inner = Math.max(1, box.rect.width - leftPad - rightPad);
+\t\t\t\t// Children are stacked vertically inside the container, so anything
+\t\t\t\t// rendered above the editor shifts its rows down.
+\t\t\t\tlet before = 0;
+\t\t\t\tif (holder !== ed) {
+\t\t\t\t\tconst sibs = Array.isArray(holder.children) ? holder.children : [];
+\t\t\t\t\tlet reached = false;
+\t\t\t\t\tfor (let i = 0; i < sibs.length; i++) {
+\t\t\t\t\t\tif (sibs[i] === ed || findEditor(sibs[i]) === ed) { reached = true; break; }
+\t\t\t\t\t\ttry { before += sibs[i].render(inner).length; } catch {}
+\t\t\t\t\t}
+\t\t\t\t\tif (!reached) {
+\t\t\t\t\t\t__tkLog({ bail: "editor is nested deeper than a direct child", rect: box.rect,
+\t\t\t\t\t\t\tholder: holder && holder.constructor ? holder.constructor.name : null, siblings: sibs.length });
+\t\t\t\t\t\treturn false;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t\tconst row = event.y - box.rect.y - before;
+\t\t\t\t// Row 0 is the editor's own top border; content starts at row 1.
 \t\t\t\tif (row < 1) {
-\t\t\t\t\t__tkLog({ bail: "click on the top border row", row: row, rect: box.rect, click: { x: event.x, y: event.y } });
+\t\t\t\t\t__tkLog({ bail: "click on the top border row", row: row, before: before, rect: box.rect, click: { x: event.x, y: event.y } });
 \t\t\t\t\treturn false;
 \t\t\t\t}
 \t\t\t\tconst vis = ed.buildVisualLineMap(ed.lastWidth);
 \t\t\t\tconst vl = vis[(ed.scrollOffset || 0) + (row - 1)];
 \t\t\t\tif (!vl) {
-\t\t\t\t\t__tkLog({ bail: "no visual line at that row", row: row, scrollOffset: ed.scrollOffset,
+\t\t\t\t\t__tkLog({ bail: "no visual line at that row", row: row, before: before, scrollOffset: ed.scrollOffset,
 \t\t\t\t\t\tlastWidth: ed.lastWidth, visualLines: vis.length, rect: box.rect });
 \t\t\t\t\treturn false;
 \t\t\t\t}
-\t\t\t\tconst maxPad = Math.max(0, Math.floor((box.rect.width - 1) / 2));
-\t\t\t\tconst pad = Math.min(ed.paddingX || 0, maxPad);
-\t\t\t\tconst col = Math.max(0, Math.min(event.x - (box.rect.x + pad), vl.length));
+\t\t\t\t// injectPromptSymbol overwrites the first four cells and
+\t\t\t\t// wrapWithSideBorders only overlays column 0, so neither shifts the
+\t\t\t\t// text: it starts at the container's leftPad plus the editor padding.
+\t\t\t\tconst pad = typeof ed.paddingX === "number" ? ed.paddingX : 4;
+\t\t\t\tconst textX = box.rect.x + leftPad + pad;
+\t\t\t\tconst col = Math.max(0, Math.min(event.x - textX, vl.length));
 \t\t\t\tconst logical = ed.state.lines[vl.logicalLine] || "";
 \t\t\t\ted.state.cursorLine = vl.logicalLine;
 \t\t\t\ted.state.cursorCol = Math.min(vl.startCol + col, logical.length);
 \t\t\t\tif (ed.snappedFromCursorCol !== undefined) ed.snappedFromCursorCol = null;
 \t\t\t\tif (ed.lastAction !== undefined) ed.lastAction = null;
-\t\t\t\tif (typeof process !== "undefined" && process.env && process.env.TWEAKKIMI_CLICK_DEBUG === "1") {
-\t\t\t\t\ttry {
-\t\t\t\t\t\tprocess.getBuiltinModule("fs").appendFileSync("/tmp/tweakkimi-click.log", JSON.stringify({
-\t\t\t\t\t\t\tclick: { x: event.x, y: event.y }, rect: box.rect, row: row,
-\t\t\t\t\t\t\tscrollOffset: ed.scrollOffset, lastWidth: ed.lastWidth, paddingX: ed.paddingX, pad: pad,
-\t\t\t\t\t\t\tvisualLines: vis.length, layoutLines: ed.layoutText(ed.lastWidth).length,
-\t\t\t\t\t\t\tvl: vl, col: col, cursor: { line: ed.state.cursorLine, col: ed.state.cursorCol },
-\t\t\t\t\t\t\ttext: logical
-\t\t\t\t\t\t}) + "\\n");
-\t\t\t\t\t} catch {}
-\t\t\t\t}
+\t\t\t\t__tkLog({
+\t\t\t\t\tok: true, click: { x: event.x, y: event.y }, rect: box.rect,
+\t\t\t\t\tholder: holder && holder.constructor ? holder.constructor.name : null,
+\t\t\t\t\tleftPad: leftPad, before: before, row: row, pad: pad, textX: textX,
+\t\t\t\t\tscrollOffset: ed.scrollOffset, lastWidth: ed.lastWidth, paddingX: ed.paddingX,
+\t\t\t\t\tvisualLines: vis.length, vl: vl, col: col,
+\t\t\t\t\tcursor: { line: ed.state.cursorLine, col: ed.state.cursorCol }, text: logical
+\t\t\t\t});
 \t\t\t\treturn true;
 \t\t\t} catch { return false; }
 \t\t}`;
