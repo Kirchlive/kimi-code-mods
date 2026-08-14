@@ -36,7 +36,7 @@ beobachtet · `offen` noch nicht gebaut.
 
 21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
 29. Haupt-CLI (Dach über allem) | ./tweakkimi.sh bzw. --menu                | done
-30. Cursor per Klick setzen     | verworfen: Maus erreicht keine Komponente | offen
+30. Cursor per Klick setzen     | patches/40-…, click_cursor in patch-settings.conf | done
 31. Arbeitsverzeichnis wechseln | patches/30-wd-command.js (neue Sitzung)   | done
 26. Launcher für Env-Schalter   | bin/kimi + env-profile.conf, --env        | done
 27. Kommando-Vorschau 50 %      | patches/10-command-preview-half-height.js | done
@@ -86,7 +86,33 @@ Redigieren mit Verhaltensfolgen und braucht kuratierte Presets, keinen Schalter.
 **23** — Bestätigt, indem Kimi mit und ohne das Flag nach seinen Skills gefragt
 wurde: aus drei wird einer.
 
-**30** — Untersucht und verworfen. Maus-Tracking ist im Alt-Screen aktiv,
+**30** — **Funktioniert**, live bestätigt am 2026-08-14 im Vollbildmodus: Ein
+Klick in den Composer setzt den Cursor an die geklickte Stelle. Nur Vollbild —
+`tui-main-screen.ts` enthält keinerlei Maus-Code, dort wäre es ein Feature statt
+eines Patches.
+
+Der Weg dahin über drei Fehlschläge, jeder mit eigener Lehre. Erstens: Der
+`CustomEditor` taucht im Layoutbaum **nicht als eigene Box** auf, weil
+`GutterContainer` seine Kinder mit `child.render(inner)` selbst rendert und die
+Zeilen verkettet — `box.component` konnte ihn nie liefern. Die Suche geht jetzt
+rekursiv durch `component.children` und nimmt die tiefste passende Box.
+Zweitens: Der Patch protokollierte nur im Erfolgsfall, ein leeres Log bedeutete
+also nichts. Drittens, und das war der eigentliche Zeitfresser: Der Aufruf
+hängt hinter `!clickedUrl && !this.selectionDragged`, und bei einem
+kurzschließenden `&&` läuft die Methode gar nicht erst an — auch ihr
+Fehler-Logging nicht. Erst ein Protokolleintrag **vor** der Bedingung trennte
+„Zweig nie erreicht" von „Flag blockiert".
+
+Diagnose bleibt eingebaut, aber still: `TWEAKKIMI_CLICK_DEBUG=1` schreibt
+Flags, Klickkoordinaten und Abbruchgründe nach `/tmp/tweakkimi-click.log`.
+
+Zum Ausgangspunkt der Recherche: **Claude Code kann das nicht.** Sein Bundle
+enthält null Maus-Aktivierungssequenzen; was es im Vollbildmodus bietet, ist
+Mausrad-Scrollen über das Terminal. Kimi ist hier weiter, es aktiviert echtes
+SGR-Tracking. Das Kopieren beim Loslassen ist ebenfalls Kimis eigener Code
+(`copySelectionToClipboard()`), kein Nebeneffekt dieses Patches.
+
+Die ursprüngliche Absage, zur Einordnung:
 inklusive SGR-Encoding, und der Parser existiert. Die Ereignisse enden aber in
 einer geschlossenen Kette — Rechtsklick-Paste, Scrollbar, Hover, Textauswahl,
 dann `consume: true`. Einen Weg zu Komponenten gibt es nicht: `componentAt`,

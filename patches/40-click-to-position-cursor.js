@@ -125,6 +125,10 @@ if (js.split(classHit[1]).length - 1 !== 1) {
 
 const METHOD = `
 \t\t__tkClickCursor(event) {
+\t\t\t// Bail reasons are always recorded, successes only with
+\t\t\t// TWEAKKIMI_CLICK_DEBUG=1. Gating the failures behind the variable made
+\t\t\t// an empty log ambiguous — it meant either "never reached" or "you
+\t\t\t// forgot the variable", and we lost a round trip to exactly that.
 \t\t\tconst __tkDbg = typeof process !== "undefined" && process.env && process.env.TWEAKKIMI_CLICK_DEBUG === "1";
 \t\t\tconst __tkLog = (o) => { if (!__tkDbg) return; try {
 \t\t\t\tprocess.getBuiltinModule("fs").appendFileSync("/tmp/tweakkimi-click.log", JSON.stringify(o) + "\\n");
@@ -249,7 +253,17 @@ if (out.split(hookText).length - 1 !== 1) {
   throw new Error('release-branch click test is not unique - refusing to guess');
 }
 
+// The gate is logged before it is evaluated, but only under the debug
+// variable. This line earned its place: `__tkClickCursor` never runs when the
+// `&&` chain short-circuits, so an empty log was ambiguous between "release
+// branch never reached" and "one of the flags was set". Logging the flags here
+// is what finally told the two apart.
 const CALL =
+  '\n\t\t\t\tif (typeof process !== "undefined" && process.env && process.env.TWEAKKIMI_CLICK_DEBUG === "1")' +
+  ' try{process.getBuiltinModule("fs").appendFileSync("/tmp/tweakkimi-click.log",' +
+  'JSON.stringify({at:"release",dragged:!!this.selectionDragged,url:!!clickedUrl,' +
+  'x:event.x,y:event.y,anchor:this.selectionAnchor?{row:this.selectionAnchor.row,col:this.selectionAnchor.col}:null})' +
+  '+"\\n")}catch{}' +
   '\n\t\t\t\tif (!clickedUrl && !this.selectionDragged && this.__tkClickCursor(event)) ' +
   '{ this.selectionAnchor = void 0; this.selectionFocus = void 0; this.requestRender(); return; }';
 
