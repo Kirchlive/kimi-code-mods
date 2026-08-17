@@ -18,6 +18,19 @@
 // credential the rest of Kimi has already decided to redact, and it means one
 // hook covers both the typed and the programmatic path.
 //
+// That it runs on every turn is the assumption this patch rests on, so it was
+// checked rather than assumed. `promptService.submit` calls it first thing,
+// before the prompt is enqueued:
+//
+//   async submit(payload) {
+//     await this.updatePromptMetadata(promptMetadataTextFromContentParts(payload.input));
+//     const handle = await this.enqueue({ message: { role: "user", …
+//
+// `submitSteer` — the ctrl-s path — does the same, and a slash command reaches
+// the same function through `promptMetadataTextFromSkill`. So a typed `/compact`
+// is routed like any other short prompt, which is the intended behaviour rather
+// than an accident.
+//
 // The splice observes and returns the value unchanged. If a release stops
 // calling it on some turn, the routed level simply persists from the previous
 // turn — the failure mode is a stale level, never a wrong request.
