@@ -31,7 +31,7 @@ beobachtet · `offen` noch nicht gebaut.
 16. Eingebaute Tools abschalten | built-in: [tools] disabled in config.toml | done
 17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | done
 18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_MAX_TURNS u. a.   | offen
-19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | wirkungslos
+19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | ungeklaert
 20. Modell je Subagent          | built-in: [secondary_model], config-menu 9 | ungetestet
 
 21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
@@ -145,13 +145,14 @@ sind rund 4.900 Token pro Turn.
 Bildschirm vollständig (Alternate-Screen-Buffer), die Shell-Historie darüber
 verschwindet für die Dauer der Sitzung.
 
-**19** — **Implementiert, aber wirkungslos.** Die Sektion ist ein Array
-(`HooksConfigSchema = array(HookDefSchema)`), also ist `[[hooks]]` das richtige
-TOML, das Schema ist `.strict()` und `kimi doctor` akzeptiert die Einträge; der
-Service liest sie in `load()` und indiziert nach Event. Trotzdem feuerte in
-0.36.0 weder `SessionStart` noch `PermissionRequest` noch `PreToolUse` — das
-Testkommando schrieb keine einzige Zeile. In den Logs steht dazu nichts.
-Warum, ist offen; bis dahin nicht darauf verlassen.
+**19** — **Implementiert, Wirkung ungeklärt.** Vier Verdachtsmomente sind
+ausgeräumt: die Sektion heißt wirklich `hooks`, das Schema ist ein Array (also
+ist `[[hooks]]` richtig), der Dienst ist **eifrig** registriert und nicht faul
+— `activation = 0` heißt in `provideScopeServices` genau das —, und dass ihn
+niemand injiziert, folgt daraus statt dagegen zu sprechen. Er abonniert im
+Konstruktor, statt aufgerufen zu werden. Offen bleibt allein, ob der Weg einer
+normalen TUI-Sitzung den Scope anlegt, in dem er registriert ist. Die
+Herleitung steht in `FINDINGS.md`.
 
 **20** — `/experiments` listet alle vier Flags mit Beschreibung, Quelle
 (`default`) und Env-Namen und lässt sie umschalten. Dass ein zweites Modell

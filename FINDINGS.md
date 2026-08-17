@@ -117,6 +117,45 @@ There are **two implementations**: the v2 one above, and an older one in
 `agent-core/src/session/hooks/` with only 16 events. Since v2 is the live
 generation, the 20-event list applies.
 
+#### Why nothing fired — how far the trail goes
+
+Hooks were configured, accepted by `kimi doctor`, and never observed running.
+Four things are now ruled out, so nobody has to rule them out again:
+
+**The section name is right.** `HOOKS_SECTION = "hooks"` in
+`agent-core-v2/src/agent/externalHooks/configSection.ts`, and
+`HooksConfigSchema = array(HookDefSchema)` — so `[[hooks]]` is the correct
+TOML, and `hooksFromToml` maps the snake_case keys on the way in.
+
+**The service is not lazy.** It registers as
+`registerScopedService("agent", IAgentExternalHooksService,
+AgentExternalHooksService, 0, "externalHooks")`, and `provideScopeServices`
+reads that fourth argument as `activation: entry.activation === 1 ?
+"ondemand" : "eager"`. Zero means **eager**: 162 services carry it, 12 carry
+the on-demand 1. So the hook service is built when its scope is created,
+whether or not anything asks for it.
+
+**Nothing needs to inject it, and that is not the bug.** `IAgentExternalHooksService`
+occurs three times in the whole bundle, all inside its own two files. That
+looks damning until the line above: an eagerly activated service has no reason
+to be injected anywhere.
+
+**It subscribes rather than being called.** Its constructor ends with
+`this.registerListeners()`, which calls `registerPermissionHooks`,
+`registerToolHooks`, `registerPromptHooks`, `registerTurnHooks`,
+`registerLoopHooks`, `registerFullCompactionHooks` and `registerTaskHooks`.
+That is why the `.trigger(` call sites in v2 all sit inside the hook modules
+themselves, while in the dead `agent-core` generation they sit in
+`agent/turn/index.ts` and friends — a difference that reads like v2 being
+unwired and is in fact just a different shape.
+
+What is left is the scope. Everything above says the service is constructed as
+soon as an `agent` (or `session`) scope exists; it was not established that the
+path a normal TUI session takes creates one. Answering that means watching a
+running Kimi — `ExternalHooksRunnerService` keeps a `summary` of hooks per
+event, which is what one would want to see, and nothing exposes it on the
+command line.
+
 ## 4. Experimental and unfinished
 
 Resolution order (`agent-core/src/flags/registry.ts`):
