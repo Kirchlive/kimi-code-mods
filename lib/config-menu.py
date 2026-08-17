@@ -63,6 +63,10 @@ S_LOOP = 'loop_control'
 K_ATTEMPTS = 'max_attempts_per_step'
 K_ATTEMPTS_OLD = 'max_retries_per_step'      # deprecated, renamed on sight
 K_RESERVED = 'reserved_context_size'
+S_SECONDARY = 'secondary_model'
+K_SM_DEFAULT = 'default_model'
+K_SM_MODELS = 'models'
+K_SM_FORCE = 'force'
 S_THINKING = 'thinking'
 K_THINK_ENABLED = 'enabled'
 K_THINK_EFFORT = 'effort'
@@ -303,13 +307,22 @@ class TomlLines:
 
 
 def lit(value) -> str:
-    """A TOML literal for the value types this menu writes."""
+    """A TOML literal for the value types this menu writes.
+
+    A dict becomes an inline table, which is what `[secondary_model].models`
+    needs — a key whose value is a table of alias to description. Falling
+    through to the string branch instead, as this did until the subagent screen
+    asked for one, writes the Python `repr` in quotes: valid TOML, accepted by
+    the file, and rejected by Kimi's schema at startup.
+    """
     if isinstance(value, bool):
         return 'true' if value else 'false'
     if isinstance(value, int):
         return str(value)
     if isinstance(value, list):
         return '[' + ', '.join('"' + str(v).replace('"', '\\"') + '"' for v in value) + ']'
+    if isinstance(value, dict):
+        return '{ ' + ', '.join(f'{k} = {lit(v)}' for k, v in value.items()) + ' }'
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
@@ -734,6 +747,174 @@ def screen_loop(st: Editing) -> m.Screen:
                     title='Loop control')
 
 
+def subagent_rules(section: dict, subagent_flag_on: bool) -> list[str]:
+    """Everything Kimi would refuse about a `[secondary_model]` section.
+
+    These are its own rules, restated where they can still be acted on. Kimi
+    enforces them in `assertValidSubagentModelConfig`, which throws
+    `CONFIG_INVALID` — so a wrong section is not a setting that quietly does
+    nothing, it is a Kimi that will not start.
+
+    WHY THIS IS NOT LEFT TO `kimi doctor`
+    Everywhere else in this menu Kimi's own validator is the authority, and
+    here it is not enough. `doctor config` accepts a pool keyed `primary`, and
+    accepts `force` combined with a pool — both were tried. The reason is in
+    the first line of the check: `if (!flags.enabled("secondary-model")) return;`.
+    The rules only run once the experiment is on, and doctor runs without it.
+    So the file passes validation, and Kimi then refuses to start the moment
+    the flag is switched on — with the config it just told you was fine.
+    """
+    problems = []
+    models = section.get(K_SM_MODELS) or {}
+    default = section.get(K_SM_DEFAULT)
+    forced = section.get(K_SM_FORCE) is True
+
+    if 'primary' in models:
+        problems.append('"primary" is reserved — it is how the main agent asks '
+                        'for the primary model, so it cannot name a pool entry')
+    if forced and models:
+        problems.append('force cannot be combined with a pool: the pool exists to '
+                        'offer a choice, and force removes it')
+    if forced and default is None:
+        problems.append('force needs default_model — there is nothing to force to')
+    if models and default is None:
+        problems.append('a pool needs default_model to say which entry is used '
+                        'unless the main agent picks another')
+    if models and default is not None and default not in models:
+        problems.append(f'default_model "{default}" is not one of the pool entries '
+                        f'({", ".join(sorted(models))})')
+    return problems
+
+
+def screen_subagent(st: Editing) -> m.Screen:
+    """Which model a subagent runs on.
+
+    This is tweakcc's "Subagent models" seen from Kimi's side, and it needs no
+    patch at all: `[secondary_model]` is a registered section in the live
+    engine. It is richer than tweakcc's per-agent-type list, too — a *pool* of
+    named models the main agent may pick from, or one model forced on every
+    subagent.
+
+    Nothing here does anything until the `secondary-model` flag is on, which is
+    why that state is the first thing the screen says. The flag lives in the
+    launcher profile (`KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL`) or in Kimi's own
+    `/experiments`; it is deliberately not written from here, because a config
+    file that silently turns on an experiment is the kind of surprise this menu
+    exists to avoid.
+    """
+    message = ''
+
+    def flag_on(s: Editing) -> bool:
+        exp = s.data.get('experimental') or {}
+        return exp.get('secondary_model') is True or exp.get('secondaryModel') is True
+
+    def reset(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        key = item.key.split(':', 1)[1]
+        s.doc.remove(S_SECONDARY, key)
+        message = f'{key} back to Kimi\'s default'
+
+    def build(s: Editing) -> list[Item]:
+        section = s.data.get(S_SECONDARY) or {}
+        models = section.get(K_SM_MODELS) or {}
+        rows = [Item('info', 'Which model a newly spawned subagent runs on.')]
+        if not flag_on(s):
+            rows.append(Item('info', 'the secondary-model flag is off — none of this '
+                                     'takes effect until it is on'))
+        for problem in subagent_rules(section, flag_on(s)):
+            rows.append(Item('info', f'Kimi would refuse this: {problem}'))
+        if message:
+            rows.append(Item('info', message))
+        rows.append(Item('sep'))
+        rows.append(Item('cycle', K_SM_FORCE,
+                         lambda x: fmt_state(*shown(x.data, K_SM_FORCE, S_SECONDARY)),
+                         key='force', choices=['on', 'off'],
+                         help='On pins every subagent to default_model and removes '
+                              'the choice. Cannot be combined with a pool.'))
+        rows.append(Item('action', K_SM_DEFAULT,
+                         lambda x: fmt_state(*shown(x.data, K_SM_DEFAULT, S_SECONDARY)),
+                         key=f'txt:{K_SM_DEFAULT}', on_cycle=reset,
+                         help='The model used unless the main agent picks another. '
+                              'Must be one of the pool entries when a pool exists.'))
+        rows.append(Item('info', f'pool: {len(models)} model(s)'
+                                 + (f' — {", ".join(sorted(models))}' if models else '')))
+        rows.append(Item('action', 'Add a pool model', lambda x: '', key='pool:add',
+                         help='An alias from your model catalogue, plus a short '
+                              'description the main agent sees.'))
+        if models:
+            rows.append(Item('action', 'Remove a pool model', lambda x: '',
+                             key='pool:remove'))
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: Editing, item: Item) -> bool:
+        nonlocal message
+        message = ''
+        if item.key == 'back':
+            return False
+        section = dict(s.data.get(S_SECONDARY) or {})
+        models = dict(section.get(K_SM_MODELS) or {})
+
+        if item.key.startswith('txt:'):
+            key = item.key[4:]
+            cur = shown(s.data, key, S_SECONDARY)[0]
+            raw = ask(f'   {key} [{cur}] (enter keeps it): ').strip()
+            if not raw:
+                return True
+            section[key] = raw
+        elif item.key == 'pool:add':
+            alias = ask('   model alias: ').strip()
+            if not alias:
+                return True
+            note = ask('   what it is good for: ').strip()
+            models[alias] = note
+            section[K_SM_MODELS] = models
+        elif item.key == 'pool:remove':
+            alias = ask(f'   which of {", ".join(sorted(models))}: ').strip()
+            if alias not in models:
+                message = f'not removed — "{alias}" is not in the pool'
+                return True
+            models.pop(alias)
+            section[K_SM_MODELS] = models
+
+        # Kimi's rules are checked before the write, not after: an invalid
+        # section stops Kimi from starting at all, and finding that out at the
+        # next launch is the worst possible moment.
+        problems = subagent_rules(section, flag_on(s))
+        if problems:
+            message = 'not written — ' + problems[0]
+            return True
+
+        if item.key.startswith('txt:'):
+            s.doc.set(S_SECONDARY, item.key[4:], lit(section[item.key[4:]]))
+            message = f'{item.key[4:]} = {section[item.key[4:]]}'
+        elif models:
+            s.doc.set(S_SECONDARY, K_SM_MODELS, lit(models))
+            message = f'pool has {len(models)} model(s)'
+        else:
+            s.doc.remove(S_SECONDARY, K_SM_MODELS)
+            message = 'pool emptied'
+        return True
+
+    def cyc(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        s.refresh()
+        if item.key != 'force':
+            return
+        section = dict(s.data.get(S_SECONDARY) or {})
+        value, explicit = shown(s.data, K_SM_FORCE, S_SECONDARY)
+        section[K_SM_FORCE] = not (value is True) if explicit else True
+        problems = subagent_rules(section, flag_on(s))
+        if problems:
+            message = 'not written — ' + problems[0]
+            return
+        s.doc.set(S_SECONDARY, K_SM_FORCE, lit(section[K_SM_FORCE]))
+        message = ''
+
+    return m.Screen(build, activate=act, cycle=cyc, reload=lambda s: s.refresh(),
+                    title='Subagent model')
+
+
 def toolsets_path() -> Path:
     """Where the named tool sets live.
 
@@ -993,6 +1174,14 @@ def screen_main(st: Editing) -> m.Screen:
                      len(read_toolsets())),
                  key='8',
                  help='Named lists of disabled tools, applied in one keystroke.'),
+            Item('submenu', 'Subagent model',
+                 lambda x: (lambda sec: 'forced' if sec.get(K_SM_FORCE) is True
+                            else (f"pool of {len(sec.get(K_SM_MODELS) or {})}"
+                                  if sec.get(K_SM_MODELS) else
+                                  (sec.get(K_SM_DEFAULT) or 'same as the main agent')))(
+                     x.data.get(S_SECONDARY) or {}),
+                 key='9',
+                 help='Which model a subagent runs on. Needs the secondary-model flag.'),
             # Environment-only settings (fullscreen, transcript window) live in
             # the launcher profile; they cannot live in config.toml.
             Item('sep'),
@@ -1052,6 +1241,8 @@ def open_item(st: Editing, item) -> bool:
         sub(screen_thinking(st), st)
     elif key == '8':
         sub(screen_toolsets(st), st)
+    elif key == '9':
+        sub(screen_subagent(st), st)
     st.refresh()
     return True
 
@@ -1201,15 +1392,25 @@ def _selfcheck():
             yield
 
     @contextlib.contextmanager
-    def answering(text: str):
-        """Stand in for the one prompt that still reads a line of text.
+    def answering(*texts: str):
+        """Stand in for the prompts that still read a line of text.
 
         Substituting the module's `ask` is what lets the path and number rows
         be driven with no terminal at all, the same way `FakeKeys` stands in
         for the keyboard everywhere else.
+
+        Several answers are consumed in order, because one row may ask twice —
+        a pool entry wants an alias and then a description. The last answer
+        repeats once the list runs out, so the common single-answer case reads
+        exactly as it did before.
         """
         global ask
-        real, ask = ask, lambda prompt: text
+        queue = list(texts) or ['']
+
+        def scripted(prompt):
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+
+        real, ask = ask, scripted
         try:
             yield
         finally:
@@ -1537,6 +1738,92 @@ def _selfcheck():
         ok('deleting a set does not touch config.toml', st.doc.text() == before)
 
         ok('tool sets: back closes', press(ts, st, 'back', 'enter')[1] is False)
+
+        # -- subagent model --------------------------------------------------
+        # The four rules are Kimi's own, and getting one wrong does not make a
+        # setting inert — it makes Kimi refuse to start. So they are checked
+        # here as a unit, before any screen is involved.
+        ok('a plain default_model is fine',
+           subagent_rules({K_SM_DEFAULT: 'fast'}, True) == [])
+        ok('"primary" is refused as a pool key',
+           any('reserved' in p for p in
+               subagent_rules({K_SM_MODELS: {'primary': ''}, K_SM_DEFAULT: 'primary'}, True)))
+        ok('force plus a pool is refused',
+           any('force cannot be combined' in p for p in
+               subagent_rules({K_SM_FORCE: True, K_SM_DEFAULT: 'a',
+                               K_SM_MODELS: {'a': ''}}, True)))
+        ok('force without default_model is refused',
+           any('force needs default_model' in p for p in
+               subagent_rules({K_SM_FORCE: True}, True)))
+        ok('a pool without default_model is refused',
+           any('needs default_model' in p for p in
+               subagent_rules({K_SM_MODELS: {'a': ''}}, True)))
+        ok('default_model outside the pool is refused',
+           any('is not one of the pool entries' in p for p in
+               subagent_rules({K_SM_MODELS: {'a': ''}, K_SM_DEFAULT: 'b'}, True)))
+        ok('a valid pool passes',
+           subagent_rules({K_SM_MODELS: {'a': 'cheap'}, K_SM_DEFAULT: 'a'}, True) == [])
+
+        # The rules are checked here rather than left to Kimi's validator
+        # because its validator does not catch them: the check behind them is
+        # gated on the secondary-model flag, and doctor runs without it. This
+        # asserts that gap rather than trusting the note about it.
+        with tempfile.TemporaryDirectory() as vd:
+            probe = Path(vd) / 'config.toml'
+            probe.write_text('[secondary_model]\nforce = true\n'
+                             'default_model = "a"\nmodels = { a = "x" }\n')
+            accepted, _ = validate(probe)
+            ok('kimi doctor does not catch force-plus-pool', accepted)
+        ok('but this menu does',
+           subagent_rules({K_SM_FORCE: True, K_SM_DEFAULT: 'a',
+                           K_SM_MODELS: {'a': 'x'}}, True) != [])
+
+        # A dict has to reach the file as an inline table. Writing the Python
+        # repr in quotes is valid TOML, passes doctor, and is rejected by the
+        # schema at startup — which is what this did before the pool needed it.
+        ok('a dict becomes an inline table',
+           lit({'a': 'cheap', 'b': 'thorough'}) == '{ a = "cheap", b = "thorough" }',
+           lit({'a': 'cheap', 'b': 'thorough'}))
+
+        st = editing()
+        sa = screen_subagent(st)
+        rows = sa.build(st)
+        ok('subagent builds rows', len(rows) > 0)
+        dead = [i for i, r in enumerate(rows) if not r.selectable]
+        pos = m.first_selectable(rows)
+        for _ in range(len(rows) * 2):
+            pos, _, _ = m.handle(sa, st, rows, pos, 'down')
+            ok('subagent: never lands on an unselectable row', pos not in dead, pos)
+        ok('subagent: back closes', press(sa, st, 'back', 'enter')[1] is False)
+
+        # The screen says so when the flag that makes any of this matter is off.
+        ok('an inactive flag is stated',
+           any(r.kind == 'info' and 'flag is off' in r.label for r in rows))
+
+        # A refused combination must leave the file untouched and say why.
+        st = editing('[secondary_model]\nmodels = { a = "cheap" }\ndefault_model = "a"\n')
+        sa = screen_subagent(st)
+        before = st.doc.text()
+        press(sa, st, 'force', 'right')
+        ok('force is refused while a pool exists', st.doc.text() == before)
+        ok('and the reason is shown',
+           any(r.kind == 'info' and 'not written' in r.label for r in sa.build(st)),
+           [r.label for r in sa.build(st) if r.kind == 'info'])
+
+        # Adding a pool entry writes the table.
+        st = editing('[secondary_model]\ndefault_model = "a"\n')
+        sa = screen_subagent(st)
+        with answering('a', 'cheap and quick'), quiet():
+            press(sa, st, 'pool:add', 'enter')
+        ok('a pool entry is written',
+           (tomllib.loads(st.doc.text())[S_SECONDARY].get(K_SM_MODELS) or {}) == {'a': 'cheap and quick'},
+           tomllib.loads(st.doc.text())[S_SECONDARY])
+
+        # An entry Kimi reserves is refused at the point it is typed.
+        before = st.doc.text()
+        with answering('primary', 'nope'), quiet():
+            press(sa, st, 'pool:add', 'enter')
+        ok('a reserved pool key is refused', st.doc.text() == before)
 
         # -- the top level -------------------------------------------------
         st = editing()

@@ -304,6 +304,14 @@ def build_items(st: State) -> list[Item]:
                         if t else 'Kimi\'s own')(data.get(cfg.S_THINKING) or {}),
              key='thinking',
              help='How hard the model thinks, and whether thinking is re-sent.'),
+        Item('submenu', 'Subagent model',
+             lambda s: (lambda sec: 'forced' if sec.get('force') is True
+                        else (f"pool of {len(sec.get('models') or {})}"
+                              if sec.get('models') else
+                              (sec.get('default_model') or 'same as the main agent')))(
+                 data.get(cfg.S_SECONDARY) or {}),
+             key='subagent',
+             help='Which model a subagent runs on. Needs the secondary-model flag.'),
         Item('submenu', 'Tool sets',
              lambda s: (lambda n: f'{n} saved' if n else 'none saved')(
                  len(cfg.read_toolsets())),
@@ -698,6 +706,8 @@ def activate(st: State, item: Item) -> bool:
         config_item(st, '7')
     elif k == 'toolsets':
         config_item(st, '8')
+    elif k == 'subagent':
+        config_item(st, '9')
     elif k == 'themes':
         state = themes.ThemeState()
         sub(themes.screen_themes(state), state)

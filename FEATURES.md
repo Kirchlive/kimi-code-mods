@@ -32,7 +32,7 @@ beobachtet · `offen` noch nicht gebaut.
 17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | done
 18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_MAX_TURNS u. a.   | offen
 19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | wirkungslos
-20. Modell je Subagent          | built-in: Flag secondary-model            | schaltbar
+20. Modell je Subagent          | built-in: [secondary_model], config-menu 9 | ungetestet
 
 21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
 29. Haupt-CLI (Dach über allem) | ./tweakkimi.sh bzw. --menu                | done
@@ -64,6 +64,7 @@ beobachtet · `offen` noch nicht gebaut.
 47. Reasoning per Umgebung      | built-in: KIMI_MODEL_THINKING_EFFORT      | ungetestet
 48. Reasoning per config.toml   | built-in: [thinking], config-menu Punkt 7 | ungetestet
 49. Werkzeug-Presets            | toolsets.conf, config-menu Punkt 8        | ungetestet
+50. Subagenten-Modellpool       | built-in: [secondary_model], config-menu 9 | ungetestet
 ```
 
 Zeile 36 läuft im installierten Binary: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md",
