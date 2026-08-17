@@ -107,6 +107,14 @@ a no-op and sail through with a broken anchor. For each it checks that the
 anchors are found, that the bundle actually changed, and that applying it to
 its own output throws `already patched` rather than patching twice.
 
+Three patches get a second kind of check, because for them placement is not
+the interesting half. The effort router, the verb rotation and the border
+translation are lifted back out of the patched bundle and **run**: a router
+that splices cleanly and then calls everything `medium` is worse than one that
+fails loudly, and a swap table that misses a character leaves a frame half
+round and half square. That check has already caught one bug in itself, which
+is the sort of thing that argues for keeping it.
+
 Then it applies the whole stack in filename order and runs `node --check` over
 the result. That last one earns its place: a patch can splice in broken
 JavaScript, pass every other check, and take the binary down at startup with
