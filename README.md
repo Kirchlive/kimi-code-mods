@@ -48,11 +48,13 @@ terminates a trailing line comment.
 ## Writing a patch
 
 Drop a `.js` file into `patches/`. They run in filename order, each receiving
-the bundle as `js` and returning the new bundle — the same shape as tweakcc's
-`adhoc-patch --script`, so patches move between the two setups with little
-work.
+the bundle as `js` and its own switches as `settings`, and returning the new
+bundle — close to the shape tweakcc's `adhoc-patch --script` uses, so patches
+move between the two setups with little work.
 
 ```js
+const MODE = String(settings.get('my_switch', 'off')).toLowerCase();
+if (MODE === 'off') throw new Error('already patched');
 const ANCHOR = '…some minified fragment…';
 if (js.includes(REPLACEMENT)) throw new Error('already patched');
 const n = js.split(ANCHOR).length - 1;
@@ -64,14 +66,88 @@ return js.replace(ANCHOR, () => REPLACEMENT);
 `already patched` is the one message treated as a no-op. Everything else
 thrown fails the run and leaves the installed binary untouched.
 
+`settings` comes from `patch-settings.conf`, read once by the runner. It used
+to be read by each patch, in twenty lines that three of them had copied; a
+fourth copy would have been the moment the four started to disagree about what
+a missing file means. Register the default in `lib/patch_settings.py` — the
+menu builds its rows from that table, so a switch is offered the moment it is
+registered, and a switch that exists only in the patch is invisible.
+
 To find anchors, run `--extract` and search `.work/bundle.js`. Useful entry
-points on 0.36.0: `systemPrompt` (207 hits), `<system-reminder>` (10 hits),
+points on 0.36.0: `systemPrompt` (207 hits), `<system-reminder>` (17 hits),
 `You are Kimi`.
 
-Two traps carried over from tweakcc, both worth respecting: minified
-identifiers contain `$`, so anchors need `[\w$]+` rather than `\w+`, and a `$`
-in a replacement string is a capture reference — always pass a function to
-`.replace()`.
+Three traps, all of which cost real time here. Minified identifiers contain
+`$`, so anchors need `[\w$]+` rather than `\w+`. A `$` in a replacement string
+is a capture reference — always pass a function to `.replace()`. And searching
+the bundle line by line finds nothing when a function body spans lines, which
+most of them do: read the file and use `indexOf`, or slice the `//#region`
+block first.
+
+**Which generation.** Kimi ships two engines side by side and most things
+exist twice. `packages/agent-core-v2` is live; `packages/agent-core` is not,
+*except* for shared support modules — the ripgrep locator lives there and v2
+calls it. Minified twins are told apart by their `$1`/`$2` suffixes, so an
+anchor that includes the unsuffixed names lands on the live copy. Check the
+`//#region` a candidate sits in before trusting it; a patch on the dead
+generation looks applied and changes nothing.
+
+## Testing a patch
+
+```
+node lib/test_patches.mjs            the runner's contract, no bundle needed
+node lib/test_patches.mjs --bundle   every patch against the real bundle
+./test.sh --full                     the above, plus the binary round-trip
+```
+
+The bundle suite is the one that matters. It applies each patch with its
+switch turned **on** — not in whatever state `patch-settings.conf` happens to
+be in, because a patch that is off by default would otherwise report itself as
+a no-op and sail through with a broken anchor. For each it checks that the
+anchors are found, that the bundle actually changed, and that applying it to
+its own output throws `already patched` rather than patching twice.
+
+Then it applies the whole stack in filename order and runs `node --check` over
+the result. That last one earns its place: a patch can splice in broken
+JavaScript, pass every other check, and take the binary down at startup with
+no message at all.
+
+## The menu
+
+```
+./tweakkimi.sh                     everything, under one roof
+python3 lib/theme-menu.py          just the colours
+python3 lib/config-menu.py         just config.toml
+```
+
+Every screen is the same object — a header, a list of rows, a help line — and
+`lib/menu.py` owns what they have in common: the arrow keys, home and end,
+digit shortcuts, the wheel, and clicks. That was written once for the root
+menu and every screen underneath it then fell back to `input()` and a number,
+so the arrow keys stopped working exactly where you had just learned to use
+them. Now they do not.
+
+Rows come in five kinds. `cycle` steps through a list with ‹› and writes as it
+goes; `action` runs on enter; `submenu` opens another screen; `info` states a
+fact and is skipped by navigation; `sep` is a rule. A row may also do both —
+carrying an `on_cycle` lets enter ask for a typed value while ‹› clears it,
+which is how a colour or a duration gets a row at all.
+
+Two things follow from how it is drawn. The mouse map is built by the same
+pass that renders, so a click cannot land on the wrong row; and anything that
+is not a row — header, separator, the help line — is inert rather than treated
+as the nearest row, because guessing what a stray click meant is worse than
+doing nothing.
+
+Without a terminal, every screen prints once and returns instead of spinning
+on EOF. That is what keeps `| less`, `--dry-run` and the test suite honest.
+
+**Colours.** `Themes` writes `~/.kimi-code/themes/<name>.json`, which Kimi
+already loads — no patch involved. The editor exists because the loader fails
+silently three ways: a colour that is not six-digit hex is dropped without a
+word, an unknown token name is kept in the file and ignored, and a theme named
+`dark`, `light` or `auto` never appears in `/theme` at all. All three are
+refused here, where you can still see why.
 
 ## Operating-system files are never input
 

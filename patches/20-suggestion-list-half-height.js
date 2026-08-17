@@ -51,36 +51,12 @@
 
 // ------------------------------------------------------------------ settings
 
-// A patch is invoked as `new Function('js', src)` from an ESM module, so there
-// is no `require` and no `__dirname` — but `process` is a global. Node 22's
-// `process.getBuiltinModule` gives us `fs` without either. The settings file
-// sits next to the patch directory, which the runner passes as argv[4]
-// (`node run-patches.mjs <in> <out> <patchDir>`); deriving the path from that
-// rather than from `process.cwd()` keeps the patch correct when the caller
-// runs from elsewhere, and follows `TWEAKKIMI_DATA` into a test sandbox.
+// The runner reads `patch-settings.conf` and hands it over as `settings`, so
+// a patch asks a question instead of parsing a file. It used to do the latter
+// here, in twenty lines that two other patches had copied; the copies were the
+// problem, not the parsing.
 const LEVELS = ['default', 'half', 'full'];
-let level = 'half';
-
-const getModule = typeof process !== 'undefined' && process.getBuiltinModule;
-if (getModule) {
-  try {
-    const fs = process.getBuiltinModule('fs');
-    const path = process.getBuiltinModule('path');
-    const patchDir = process.argv[4];
-    if (patchDir) {
-      const conf = path.join(path.dirname(path.resolve(patchDir)), 'patch-settings.conf');
-      if (fs.existsSync(conf)) {
-        for (const line of fs.readFileSync(conf, 'utf8').split('\n')) {
-          const m = /^\s*suggestion_height\s*=\s*([^#\s]+)/.exec(line.replace(/#.*/, ''));
-          if (m) level = m[1].trim().toLowerCase();
-        }
-      }
-    }
-  } catch {
-    // An unreadable settings file must not fail the run; `half` stands in.
-    level = 'half';
-  }
-}
+const level = String(settings.get('suggestion_height', 'half')).toLowerCase();
 
 if (!LEVELS.includes(level)) {
   throw new Error(`suggestion_height must be one of ${LEVELS.join(', ')} - got "${level}"`);

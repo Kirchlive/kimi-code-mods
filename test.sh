@@ -104,6 +104,9 @@ rm "$P/wrong.js"; : > "$P/._sidecar.js"
 node "$HERE/lib/run-patches.mjs" "$D/in.js" "$D/out.js" "$P" >/dev/null 2>&1
 check $? 'an AppleDouble sidecar in patches/ is not executed'
 
+node "$HERE/lib/test_patches.mjs" >/dev/null 2>&1
+check $? 'patch runner contract (settings channel, no-op, failures)'
+
 echo
 echo 'auto-repatch guard:'
 bash "$HERE/lib/test_guard.sh" >/dev/null 2>&1
@@ -120,8 +123,12 @@ python3 "$HERE/lib/config-menu.py" --selfcheck >/dev/null 2>&1
 check $? 'config-menu selfcheck'
 python3 "$HERE/lib/keyreader.py" >/dev/null 2>&1
 check $? 'keyreader selfcheck (arrow-key decoding)'
+python3 "$HERE/lib/menu.py" >/dev/null 2>&1
+check $? 'menu selfcheck (screens, navigation, mouse mapping)'
 python3 "$HERE/lib/patch_settings.py" >/dev/null 2>&1
 check $? 'patch_settings selfcheck'
+python3 "$HERE/lib/theme-menu.py" --selfcheck >/dev/null 2>&1
+check $? 'theme editor selfcheck (schema, merging, screens)'
 python3 "$HERE/lib/main-menu.py" --selfcheck >/dev/null 2>&1
 check $? 'main-menu selfcheck (state, navigation, cycling)'
 # The menu must not spin when there is no terminal: it prints once and exits.
@@ -156,6 +163,16 @@ if [ "${1:-}" = --full ]; then
     python3 "$HERE/lib/apply-prompt-overrides.py" "$W/b.js" "$W/prompts" "$W/rt.js" >/dev/null 2>&1
     cmp -s "$W/b.js" "$W/rt.js"
     check $? 'all prompts extract and re-apply losslessly'
+
+    # Every patch against the real bundle, each one switched *on*. This is the
+    # only check that catches an anchor the release moved, which is the one
+    # way a patch fails in practice.
+    if [ -f "$HERE/.work/bundle.js" ]; then
+      node "$HERE/lib/test_patches.mjs" --bundle >/dev/null 2>&1
+      check $? 'every patch finds its anchors in the extracted bundle'
+    else
+      echo '  skip — no .work/bundle.js; run ./kimi-patch.sh --extract'
+    fi
   fi
 fi
 

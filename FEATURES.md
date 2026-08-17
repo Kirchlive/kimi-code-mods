@@ -46,7 +46,54 @@ beobachtet · `offen` noch nicht gebaut.
 23. Eingebaute Skills abschalten| built-in: builtinProductSkills=false      | done
 24. Profil-Presets              | Overrides für agent/coder/explore/plan    | offen
 25. Preset teilen               | Prompt-Baum als Diff-Bündel exportieren   | offen
+
+33. Pfeilnavigation überall     | lib/menu.py, jeder Bildschirm ein Screen  | done
+34. Einstellungskanal für Patches| lib/run-patches.mjs reicht `settings` durch | done
+35. Patch-Testsuite             | lib/test_patches.mjs, auch gegen das Bundle | done
+36. Projektdateien: CLAUDE.md &c| patches/50-agents-md-names.js             | ungetestet
+37. Zeilennummern beim Read     | patches/55-read-line-numbers.js           | ungetestet
+38. Ausgeklappt statt gefaltet  | patches/74-expanded-by-default.js         | ungetestet
+39. Plan ohne Rückfrage         | patches/77-auto-accept-plan.js            | ungetestet
+40. Read-Grenzen anheben        | patches/79-read-limits.js                 | ungetestet
+41. Effort je Turn (Router)     | patches/80-effort-router.js               | ungetestet
+42. Spinner-Zeichen und -Tempo  | patches/70-spinner-style.js               | ungetestet
+43. Denk-Verben rotieren        | patches/71-thinking-verbs.js              | ungetestet
+44. Eigene Nachricht gestalten  | patches/72-user-message.js                | ungetestet
+45. Composer-Rahmen             | patches/73-input-box-border.js            | ungetestet
+46. Theme-Editor                | lib/theme-menu.py, ~/.kimi-code/themes/   | ungetestet
+47. Reasoning per Umgebung      | built-in: KIMI_MODEL_THINKING_EFFORT      | ungetestet
+48. Reasoning per config.toml   | built-in: [thinking], config-menu Punkt 7 | ungetestet
+49. Werkzeug-Presets            | toolsets.conf, config-menu Punkt 8        | ungetestet
 ```
+
+`ungetestet` heißt hier genau eine Sache: der Patch findet seine Anker im
+echten Bundle, verändert es, weigert sich beim zweiten Anwenden und das Ganze
+ergibt zusammen noch gültiges JavaScript — das prüft `lib/test_patches.mjs`
+gegen `.work/bundle.js`. Was noch aussteht, ist die Beobachtung in einer
+laufenden Sitzung. Bei den Zeilen 36 bis 45 ist das ein Patchlauf und ein
+Blick; bei 41 ist es mehr, siehe unten.
+
+## Bewusst nicht gebaut
+
+Drei Punkte aus der tweakcc-Liste sind geprüft und verworfen, statt halb
+umgesetzt zu werden.
+
+**Per-Skill-Schalter.** Kimis einziger Hebel dafür ist der Frontmatter-Schlüssel
+`disable-model-invocation` in der Skill-Datei selbst. Ein Menü, das den setzt,
+bearbeitet fremde Inhalte statt tweakkimis eigene Konfiguration — eine andere
+Art von Eingriff als alles andere hier. Global geht es weiter über
+`builtin_product_skills` und `extra_skill_dirs`.
+
+**Better Claude in Chrome.** Belegt ist nur, dass Kimi `mcpServers` liest. Dass
+die Brücke daran funktioniert, ist nicht geprüft, und ein Installer, der ein
+fremdes Repository holt und verdrahtet, ohne dass jemand das Ergebnis gesehen
+hat, wäre genau die Art Arbeit, die hier nichts zu suchen hat.
+
+**Klassifikator-Modell für den Effort-Router.** tweakcc fragt dafür Haiku in
+einem Seitenaufruf. Kimi hat keinen solchen Helfer zum Ausleihen, also wäre das
+ein zweiter Anfrageweg innerhalb eines Patches — ein Feature, kein Patch. Der
+Router in Zeile 41 entscheidet stattdessen nach einer Regel, die man in zehn
+Sekunden liest; sie ist am Rand schlechter und sagt das im Kopfkommentar.
 
 ## Anmerkungen zu den nicht offensichtlichen Zeilen
 

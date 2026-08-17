@@ -10,3 +10,6 @@ state.json
 # Python bytecode from the lib/ helpers.
 __pycache__/
 *.pyc
+
+# code index, rebuilt on demand
+.codegraph/

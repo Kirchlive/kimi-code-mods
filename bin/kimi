@@ -48,7 +48,23 @@ KIMI_TUI_INPUT_LATENCY
 KIMI_TUI_INPUT_LATENCY_LOG
 KIMI_CODE_HOME
 KIMI_PLUGIN_ROOT
+KIMI_MODEL_THINKING_EFFORT
+KIMI_MODEL_THINKING_KEEP
+KIMI_MODEL_TEMPERATURE
+KIMI_MODEL_TOP_P
+KIMI_MODEL_MAX_COMPLETION_TOKENS
 "
+
+# The five `KIMI_MODEL_*` names above are the ones that work on their own. The
+# rest of that family — NAME, API_KEY, BASE_URL, MAX_CONTEXT_SIZE,
+# CAPABILITIES, DISPLAY_NAME, REASONING_KEY, ADAPTIVE_THINKING — are deliberately
+# absent, and the reason is worth writing down because it looks like an
+# oversight. In `agent-core-v2/src/app/kosongConfig/envOverlay.ts` they are read
+# only after `KIMI_MODEL_NAME` is set, and setting that defines a whole custom
+# model: it also demands `KIMI_MODEL_API_KEY`, fails the start without it, and
+# repoints `defaultModel` at the model it just invented. Offering
+# `KIMI_MODEL_MAX_CONTEXT_SIZE` here as if it were a context-window dial would
+# be a lie — on its own it does nothing at all.
 
 is_known() {
   case "$KNOWN_VARS" in *"

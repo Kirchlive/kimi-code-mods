@@ -37,12 +37,14 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 
+import menu as m                                             # noqa: E402
 import patch_settings as ps                                  # noqa: E402
-from keyreader import FakeKeys, Mouse, raw_mode, read_key, sgr  # noqa: E402
+from keyreader import FakeKeys, Mouse, read_key, sgr         # noqa: E402
+from menu import Item, first_selectable, move                # noqa: E402
 from oscruft import is_os_cruft, usable_files                # noqa: E402
 
 PATCH_GLOB = '*.js'
-CURSOR = '❯'                    # ❯, the tweakcc marker
+CURSOR = m.CURSOR               # ❯, the tweakcc marker
 
 
 def _load(name: str, filename: str):
@@ -58,6 +60,11 @@ def _load(name: str, filename: str):
 # all with their own self-check. The menu below imports it as a library rather
 # than reimplementing any of that, and `--config-menu` remains a working alias.
 cfg = _load('config_menu', 'config-menu.py')
+
+# The theme editor is its own module for the same reason: it owns the schema
+# Kimi's loader enforces, and validating a colour in two places would mean
+# disagreeing about it eventually.
+themes = _load('theme_menu', 'theme-menu.py')
 
 
 # --------------------------------------------------------------------------
@@ -241,33 +248,6 @@ def suggestion_entries(level: str, rows: int | None = None) -> int:
 # --------------------------------------------------------------------------
 
 
-class Item:
-    """One row.
-
-    `kind` decides what the arrow keys do:
-      submenu  enter opens it
-      cycle    left/right/enter step through `choices`, writing as they go
-      action   enter runs it
-      sep      a rule, skipped by navigation
-    """
-
-    def __init__(self, kind, label='', value=lambda st: '', note=lambda st: '',
-                 key='', choices=None, on_cycle=None, on_enter=None, help=''):
-        self.kind = kind
-        self.label = label
-        self.value = value
-        self.note = note
-        self.key = key
-        self.choices = choices or []
-        self.on_cycle = on_cycle
-        self.on_enter = on_enter
-        self.help = help
-
-    @property
-    def selectable(self) -> bool:
-        return self.kind != 'sep'
-
-
 def build_items(st: State) -> list[Item]:
     data = config_summary(st)
     disabled = (data.get(cfg.S_TOOLS) or {}).get('disabled') or []
@@ -305,6 +285,11 @@ def build_items(st: State) -> list[Item]:
                         else 'off') + '   [no effect in 0.36.0]',
              key='mergeskills',
              help='Search every brand directory or only the first — identical while each lists one.'),
+        Item('submenu', 'Themes',
+             lambda s: (lambda n: f'{n} custom' if n else 'built-in only')(
+                 len(themes.list_themes())),
+             key='themes',
+             help='Kimi loads themes from ~/.kimi-code/themes; switch with /theme.'),
         Item('submenu', 'Permission mode',
              lambda s: str(perm) if perm else 'manual (Kimi default)',
              key='permission',
@@ -317,26 +302,18 @@ def build_items(st: State) -> list[Item]:
 
         Item('sep'),
 
-        Item('cycle', 'Command suggestion',
-             lambda s: (lambda lv: f'{lv}   ~{suggestion_entries(lv)} entries')(
-                 s.settings.get('suggestion_height', 'default')),
-             note_for(sugg_patch), key='suggestion_height',
-             choices=ps.CHOICES['suggestion_height'],
-             help='Height of the slash-command list: Kimi\'s five, half the window, or nearly full.'),
+        # One row for every patch switch, rather than a handful of the popular
+        # ones here and the rest nowhere. Each setting then has exactly one
+        # place that writes it, which is what keeps the menu and the patches
+        # from disagreeing about a default.
+        Item('submenu', 'Patch settings',
+             lambda s: (lambda n: f'{n} switch(es)')(len(ps.CHOICES)),
+             key='patchsettings',
+             help='Everything the patches read while they are applied.'),
         Item('cycle', 'Fullscreen renderer',
              lambda s: 'always' if env_value(s.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1' else 'default',
              key='fullscreen', choices=['default', 'always'],
              help='Run Kimi in the alternate screen buffer. Applied by bin/kimi.'),
-        Item('cycle', 'Working directory /wd',
-             lambda s: s.settings.get('wd_command', 'off'),
-             note_for(wd_patch), key='wd_command',
-             choices=ps.CHOICES['wd_command'],
-             help='Adds a /wd slash command for changing the working directory.'),
-        Item('cycle', 'Click to position cursor',
-             lambda s: s.settings.get('click_cursor', 'off'),
-             note_for(click_patch), key='click_cursor',
-             choices=ps.CHOICES['click_cursor'],
-             help='Place the cursor in the composer with a mouse click.'),
         Item('submenu', 'Transcript window',
              lambda s: f'{env_count(s.root)} variable(s) set',
              key='display',
@@ -380,58 +357,31 @@ def banner(st: State) -> list[str]:
     return out
 
 
+def header(st: State) -> list[str]:
+    return ['', 'tweakkimi',
+            f'Kimi {st.version} — {st.binary_state}, {st.signature} signature'] + banner(st)
+
+
+def reload_state(st: State) -> State:
+    raw = read_status(st.root)
+    return State(st.root, raw, binary_path(raw))
+
+
+# The root screen. Everything about drawing, arrow keys, the wheel and clicks
+# lives in menu.py; what stays here is only what is specific to this screen.
+SCREEN = m.Screen(build=lambda st: build_items(st), header=header,
+                  activate=lambda st, item: activate(st, item),
+                  cycle=lambda st, item, fwd: cycle_item(st, item, fwd),
+                  reload=reload_state, help_line=m.HELP_ROOT)
+
+
 def render(st: State, items: list[Item], cursor: int,
            row_map: dict | None = None) -> list[str]:
-    """The menu as lines, optionally recording which line each entry landed on.
-
-    The mapping is built here rather than recomputed later, because here it is
-    free: the index of the line about to be appended is simply `len(lines)`.
-    Working it out afterwards would mean counting banner lines and separators a
-    second time, in a second place, with a second chance of drifting apart.
-    """
-    lines = ['', 'tweakkimi',
-             f'Kimi {st.version} — {st.binary_state}, {st.signature} signature']
-    lines += banner(st)
-    lines.append('')
-
-    n = 0
-    for i, it in enumerate(items):
-        if it.kind == 'sep':
-            lines.append('   ' + '─' * 66)
-            continue
-        n += 1
-        mark = CURSOR if i == cursor else ' '
-        value = it.value(st)
-        note = it.note(st)
-        if note:
-            value = f'{value}   [{note}]' if value else f'[{note}]'
-        arrows = ' ‹›' if it.kind == 'cycle' else '   '
-        if row_map is not None:
-            row_map[len(lines)] = i
-        lines.append(f' {mark} {n:>2}  {it.label:<26}{arrows} {value}')
-
-    lines.append('')
-    sel = items[cursor] if 0 <= cursor < len(items) else None
-    if sel is not None and sel.help:
-        lines.append(f'   {sel.help}')
-        lines.append('')
-    lines.append('   ↑↓ or wheel move · enter or click open · ‹› change · q quit')
-    return lines
+    return m.render(SCREEN, st, items, cursor, row_map)
 
 
 def draw(st: State, items: list[Item], cursor: int) -> dict:
-    """Paint the menu and return the line-to-entry mapping for the mouse.
-
-    Clear-and-home puts the first line at screen row 0, which is what makes the
-    mapping usable directly: a click's zero-based row *is* an index into the
-    list that was just printed. That holds as long as the menu fits the window;
-    on a very short terminal the top scrolls away and clicks land one entry off.
-    """
-    sys.stdout.write('\x1b[2J\x1b[H')
-    row_map: dict[int, int] = {}
-    print('\n'.join(render(st, items, cursor, row_map)))
-    sys.stdout.flush()
-    return row_map
+    return m.draw(SCREEN, st, items, cursor)
 
 
 # --------------------------------------------------------------------------
@@ -461,75 +411,243 @@ def config_item(st: State, item: str) -> None:
     run([sys.executable, str(HERE / 'config-menu.py'), '--item', item], st.root)
 
 
-def menu_prompts(st: State) -> None:
-    print('\nSystem prompts')
-    print(f'   {st.prompts_total} files in system-prompts/, {st.prompts_edited} edited\n')
-    print('   1  Cost report')
-    print('   2  Re-extract from the binary')
-    print('   3  Migrate onto a newly extracted tree')
-    print('   q  back')
+def ask(prompt: str) -> str:
+    """One line of free text, for the few values no list can offer.
+
+    Wrapped so the caller does not have to think about a closed stdin, which
+    happens whenever the menu is smoke-tested without a terminal.
+    """
     try:
-        c = input('\n > ').strip().lower()
+        return input(prompt).strip()
     except (EOFError, KeyboardInterrupt):
-        return
-    if c == '1':
-        run([sys.executable, str(HERE / 'prompt-cost.py'), str(st.prompt_dir)], st.root)
-    elif c == '2':
-        run([str(st.root / 'kimi-patch.sh'), '--extract-prompts'], st.root)
-    elif c == '3':
-        tree = input('freshly extracted tree: ').strip()
-        if tree:
-            run([str(st.root / 'kimi-patch.sh'), '--migrate', tree], st.root)
+        return ''
 
 
-def menu_display(st: State) -> None:
-    """The transcript window — environment-only, applied by bin/kimi."""
+def sub(screen: m.Screen, st: State) -> None:
+    """Run a submenu, then repaint the caller's screen on the way out."""
+    m.loop(screen, st)
+
+
+def screen_prompts(st: State) -> m.Screen:
+    def build(s: State) -> list[Item]:
+        return [
+            Item('info', f'{s.prompts_total} files in system-prompts/, '
+                         f'{s.prompts_edited} edited'),
+            Item('sep'),
+            Item('action', 'Cost report', lambda x: 'what the prompts weigh',
+                 key='cost', help='Token cost per prompt, and what your edits have saved.'),
+            Item('action', 'Re-extract from the binary', lambda x: '', key='extract',
+                 help='Writes to system-prompts.<version>.new/ when a tree already exists.'),
+            Item('action', 'Migrate onto a new tree', lambda x: '', key='migrate',
+                 help='Three-way merge of your overrides onto freshly extracted prompts.'),
+            Item('action', 'Open the prompt directory', lambda x: '', key='open'),
+            Item('sep'),
+            Item('action', 'Back', lambda x: '', key='back'),
+        ]
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key == 'cost':
+            run([sys.executable, str(HERE / 'prompt-cost.py'), str(s.prompt_dir)], s.root)
+        elif item.key == 'extract':
+            run([str(s.root / 'kimi-patch.sh'), '--extract-prompts'], s.root)
+        elif item.key == 'migrate':
+            tree = ask('freshly extracted tree: ')
+            if tree:
+                run([str(s.root / 'kimi-patch.sh'), '--migrate', tree], s.root)
+        elif item.key == 'open':
+            open_file(s.prompt_dir)
+        return True
+
+    return m.Screen(build, activate=act, reload=reload_state,
+                    title='System prompts')
+
+
+def env_rows(root: Path) -> list[tuple[str, str]]:
+    """Every variable the launcher accepts, with its value in the profile."""
+    r = subprocess.run(['bash', str(HERE / 'kimi-env.sh'), 'list'],
+                       capture_output=True, text=True)
+    names = []
+    for line in r.stdout.splitlines()[1:]:
+        parts = line.split()
+        if parts:
+            names.append(parts[0])
+    return [(n, env_value(root, n) or '') for n in names]
+
+
+def screen_display(st: State) -> m.Screen:
+    """The launcher's environment profile, one row per accepted variable."""
     env = str(HERE / 'kimi-env.sh')
-    print('\nTranscript window and other launcher variables')
-    subprocess.run(['bash', env, 'show'])
-    print('\n   1  Set a variable      2  Unset a variable      3  List what is accepted')
-    print('   q  back')
-    try:
-        c = input('\n > ').strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return
-    if c == '1':
-        name = input('variable: ').strip()
-        val = input('value: ').strip()
-        if name and val:
-            subprocess.run(['bash', env, 'set', name, val])
-            input('\n[enter] back ')
-    elif c == '2':
-        name = input('variable: ').strip()
-        if name:
-            subprocess.run(['bash', env, 'unset', name])
-            input('\n[enter] back ')
-    elif c == '3':
-        subprocess.run(['bash', env, 'list'])
-        input('\n[enter] back ')
+
+    def build(s: State) -> list[Item]:
+        rows = [Item('info', 'set a value with enter, clear it with ‹›; '
+                             'blank means Kimi\'s own default'),
+                Item('sep')]
+        for name, value in env_rows(s.root):
+            rows.append(Item('action', name,
+                             (lambda v: lambda x: v or '—')(value),
+                             key=f'env:{name}'))
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key.startswith('env:'):
+            name = item.key[4:]
+            val = ask(f'{name} = ')
+            if val:
+                subprocess.run(['bash', env, 'set', name, val])
+            else:
+                subprocess.run(['bash', env, 'unset', name], capture_output=True)
+        return True
+
+    def clear(s: State, item: Item, forward: bool) -> None:
+        if item.key.startswith('env:'):
+            subprocess.run(['bash', env, 'unset', item.key[4:]], capture_output=True)
+
+    # `cycle` is wired to the same rows so ‹› clears a variable. An action row
+    # never receives a cycle, so this only fires where it is meant to.
+    return m.Screen(build, activate=act, cycle=clear, reload=reload_state,
+                    title='Launcher environment')
 
 
-def menu_patches(st: State) -> None:
-    print('\nPatches in patches/')
-    if not st.patches:
-        print('   none')
-    try:
-        cutoff = st.binary.stat().st_mtime
-    except OSError:
-        cutoff = None
-    for p in st.patches:
-        if cutoff is None:
-            mark = 'unknown'
-        elif p.stat().st_mtime > cutoff:
-            mark = 'changed since the last run'
-        else:
-            mark = 'in the binary' if st.is_patched else 'not applied'
-        print(f'   {p.name:<46} {mark}')
-    print('\n   Add a patch by dropping a .js file here; see the README for the shape.')
-    try:
-        input('\n[enter] back to the menu ')
-    except (EOFError, KeyboardInterrupt):
-        print()
+# Every patch-backed switch, with the sentence that explains what it costs.
+# The table is keyed by the setting rather than by the patch file, because the
+# setting is what the menu writes and what the patch reads; a patch renamed or
+# split in two changes nothing here.
+#
+# Anything in `ps.CHOICES` missing from this table is still offered, without
+# help text and marked as such. That is deliberate: a new patch is usable the
+# moment it registers its default, and the gap is visible instead of silent,
+# which is what a hardcoded list of rows would have made it.
+PATCH_HELP = {
+    'suggestion_height': (
+        'Command suggestions',
+        'Height of the slash-command list: Kimi\'s five, half the window, or nearly full.', 'suggestion'),
+    'wd_command': (
+        'Working directory /wd',
+        'Adds a /wd slash command that starts a session in another directory.', 'wd'),
+    'click_cursor': (
+        'Click to position cursor',
+        'Place the cursor in the composer with a mouse click. Fullscreen only.', 'click'),
+    'agents_md_names': (
+        'Project instruction files',
+        'Also read CLAUDE.md and friends. AGENTS.md keeps priority; one file per directory.', 'agents-md'),
+    'read_line_numbers': (
+        'Line numbers in Read',
+        'Off saves tokens on every read, and costs the model the ability to cite a line.', 'line-numbers'),
+    'expanded_by_default': (
+        'Expanded by default',
+        'Show thinking blocks and tool output unfolded. Costs screen, not tokens.', 'expanded'),
+    'read_limits': (
+        'Read limits',
+        'How much one Read returns. Higher trades round trips for context.', 'read-limits'),
+    'auto_accept_plan': (
+        'Auto-accept plans',
+        'Skip the plan approval prompt. A multi-option plan then has no option chosen.', 'auto-accept'),
+    'effort_router': (
+        'Effort router',
+        'Set reasoning effort per turn from the prompt. pin only ever raises it.', 'effort-router'),
+    'spinner_style': (
+        'Spinner shape',
+        'Which characters the working indicator cycles through.', 'spinner'),
+    'spinner_interval_ms': (
+        'Spinner speed',
+        'Milliseconds per frame, 20 to 2000. Lower is faster.', 'spinner'),
+    'thinking_verbs': (
+        'Thinking verbs',
+        'Rotate the word beside the spinner instead of always saying "working".', 'verbs'),
+    'user_message_marker': (
+        'Your message marker',
+        'The prefix in front of what you typed. Kimi\'s own is a sparkle.', 'user-message'),
+    'user_message_border': (
+        'Your message border',
+        'Draw a frame around your own messages in the transcript.', 'user-message'),
+    'user_message_style': (
+        'Your message style',
+        'How your own text is drawn. Kimi\'s own is bold.', 'user-message'),
+    'input_box_border': (
+        'Composer border',
+        'The frame around the input box. off leaves the space blank.', 'input-box'),
+}
+
+
+def screen_patch_settings(st: State) -> m.Screen:
+    """One row per patch switch, in the order they were registered."""
+
+    def build(s: State) -> list[Item]:
+        rows = [Item('info', 'read while the patches are applied — '
+                             'a change here needs a patch run'),
+                Item('sep')]
+        for key in ps.DEFAULTS:
+            label, help_text, needle = PATCH_HELP.get(
+                key, (key.replace('_', ' ').capitalize(),
+                      'No description registered in PATCH_HELP yet.', key.split('_')[0]))
+            patch = s.patch_file(needle)
+            value = (lambda k: lambda x: x.settings.get(k, ps.DEFAULTS.get(k, '')))(key)
+            note = (lambda q: lambda x: x.feature_note(q))(patch)
+            if key in ps.CHOICES:
+                rows.append(Item('cycle', label, value, note,
+                                 key=key, choices=ps.CHOICES[key], help=help_text))
+            else:
+                # No list can hold a duration or a prefix, so enter asks.
+                rows.append(Item('action', label, value, note,
+                                 key=key, help=help_text + '  (enter to type a value)'))
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key in ps.DEFAULTS:
+            current = s.settings.get(item.key, ps.DEFAULTS[item.key])
+            raw = ask(f'{item.key} [{current}] (empty restores the default): ')
+            ps.set_value(item.key, raw or ps.DEFAULTS[item.key], s.settings_path)
+        return True
+
+    def cyc(s: State, item: Item, forward: bool) -> None:
+        ps.cycle(item.key, forward, s.settings_path)
+
+    return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
+                    title='Patch settings')
+
+
+def screen_patches(st: State) -> m.Screen:
+    def mark_for(s: State, p: Path) -> str:
+        try:
+            cutoff = s.binary.stat().st_mtime
+        except OSError:
+            return 'unknown'
+        if p.stat().st_mtime > cutoff:
+            return 'changed since the last run'
+        return 'in the binary' if s.is_patched else 'not applied'
+
+    def build(s: State) -> list[Item]:
+        rows: list[Item] = []
+        for p in s.patches:
+            rows.append(Item('action', p.name,
+                             (lambda q: lambda x: mark_for(x, q))(p),
+                             key=f'open:{p}',
+                             help='enter opens it in your editor'))
+        if not rows:
+            rows.append(Item('info', 'none — drop a .js file into patches/'))
+        rows += [Item('sep'),
+                 Item('info', 'Add a patch by dropping a .js file here; '
+                              'see the README for the shape.'),
+                 Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key.startswith('open:'):
+            open_file(Path(item.key[5:]))
+        return True
+
+    return m.Screen(build, activate=act, reload=reload_state,
+                    title='Patches in patches/')
 
 
 def cycle_item(st: State, item: Item, forward: bool) -> None:
@@ -553,7 +671,7 @@ def activate(st: State, item: Item) -> bool:
     if k == 'quit':
         return False
     if k == 'prompts':
-        menu_prompts(st)
+        sub(screen_prompts(st), st)
     elif k == 'tools':
         config_item(st, '1')
     elif k == 'skills':
@@ -566,10 +684,15 @@ def activate(st: State, item: Item) -> bool:
         config_item(st, '5')
     elif k == 'loop':
         config_item(st, '6')
+    elif k == 'themes':
+        state = themes.ThemeState()
+        sub(themes.screen_themes(state), state)
+    elif k == 'patchsettings':
+        sub(screen_patch_settings(st), st)
     elif k == 'display':
-        menu_display(st)
+        sub(screen_display(st), st)
     elif k == 'patches':
-        menu_patches(st)
+        sub(screen_patches(st), st)
     elif k == 'cost':
         run([sys.executable, str(HERE / 'prompt-cost.py'), str(st.prompt_dir)], st.root)
     elif k == 'apply':
@@ -594,90 +717,15 @@ def activate(st: State, item: Item) -> bool:
 # --------------------------------------------------------------------------
 
 
-def first_selectable(items: list[Item], start: int = 0, step: int = 1) -> int:
-    i = start
-    for _ in range(len(items)):
-        if 0 <= i < len(items) and items[i].selectable:
-            return i
-        i = (i + step) % len(items)
-    return 0
-
-
-def move(items: list[Item], cursor: int, step: int) -> int:
-    """Next selectable row, wrapping, skipping separators."""
-    i = cursor
-    for _ in range(len(items)):
-        i = (i + step) % len(items)
-        if items[i].selectable:
-            return i
-    return cursor
-
-
 def handle_mouse(st: State, items: list[Item], cursor: int,
                  ev: Mouse, row_map: dict) -> tuple[int, bool, bool]:
-    """One click or wheel step. Same return shape as `handle`.
-
-    A click both selects and acts, because a menu row is a button: making it
-    select first and act on a second click would be a keyboard habit imposed on
-    a pointer. Anything that is not an entry — header, banner, separator, the
-    help line — is inert rather than treated as the nearest entry; guessing
-    what a stray click meant is worse than doing nothing.
-    """
-    if ev.wheel_up:
-        return move(items, cursor, -1), True, False
-    if ev.wheel_down:
-        return move(items, cursor, 1), True, False
-    if not ev.is_left:                      # middle and right have no meaning here
-        return cursor, True, False
-
-    idx = row_map.get(ev.row)
-    if idx is None or not (0 <= idx < len(items)) or not items[idx].selectable:
-        return cursor, True, False
-
-    item = items[idx]
-    if item.kind == 'cycle':
-        cycle_item(st, item, True)
-        return idx, True, True
-    return idx, activate(st, item), True
+    return m.handle_mouse(SCREEN, st, items, cursor, ev, row_map)
 
 
 def handle(st: State, items: list[Item], cursor: int, key,
            row_map: dict | None = None) -> tuple[int, bool, bool]:
     """One keystroke or click. Returns (cursor, keep_running, needs_reload)."""
-    if isinstance(key, Mouse):
-        return handle_mouse(st, items, cursor, key, row_map or {})
-    if key in ('q', 'esc', 'ctrl-c', 'eof'):
-        return cursor, False, False
-    if key == 'up':
-        return move(items, cursor, -1), True, False
-    if key == 'down':
-        return move(items, cursor, 1), True, False
-    if key == 'home':
-        return first_selectable(items), True, False
-    if key == 'end':
-        return first_selectable(items, len(items) - 1, -1), True, False
-
-    item = items[cursor] if 0 <= cursor < len(items) else None
-
-    if key in ('left', 'right') and item is not None and item.kind == 'cycle':
-        cycle_item(st, item, key == 'right')
-        return cursor, True, True
-    if key == 'enter' and item is not None:
-        if item.kind == 'cycle':
-            cycle_item(st, item, True)
-            return cursor, True, True
-        return cursor, activate(st, item), True
-
-    if key.isdigit():
-        want = int(key)
-        n = 0
-        for i, it in enumerate(items):
-            if it.kind == 'sep':
-                continue
-            n += 1
-            if n == want:
-                return i, True, False
-    return cursor, True, False
+    return m.handle(SCREEN, st, items, cursor, key, row_map)
 
 
 def interactive(root: Path) -> int:
@@ -688,37 +736,9 @@ def interactive(root: Path) -> int:
         print(raw.strip()[:400])
         return 1
 
-    items = build_items(st)
-    cursor = first_selectable(items)
-
-    if not sys.stdin.isatty():
-        # No terminal: print the menu once and stop, rather than spinning on
-        # EOF. Keeps `| less`, CI and `--dry-run` honest.
-        print('\n'.join(render(st, items, cursor)))
-        return 0
-
-    while True:
-        row_map = draw(st, items, cursor)
-        # Raw mode and mouse tracking wrap the keystroke only. Everything an
-        # entry may run — the TOML editor, kimi-patch.sh, an editor — reads
-        # lines from this same terminal: cbreak mode would break their prompts,
-        # and tracking left on would feed them escape sequences every time the
-        # pointer moved. Switching both off between keystrokes costs a few
-        # bytes and removes a whole class of interference.
-        with raw_mode(mouse=True):
-            key = read_key()
-        cursor, keep, reload_ = handle(st, items, cursor, key, row_map)
-        if not keep:
-            break
-        if reload_:
-            raw = read_status(root)
-            st = State(root, raw, binary_path(raw))
-            items = build_items(st)
-            cursor = min(cursor, len(items) - 1)
-            if not items[cursor].selectable:
-                cursor = first_selectable(items)
+    rc = m.loop(SCREEN, st)
     print()
-    return 0
+    return rc
 
 
 # --------------------------------------------------------------------------
@@ -848,26 +868,45 @@ def _selfcheck() -> int:
             check(f'{key} quits', keep is False)
 
         # -- value cycling writes through --------------------------------
+        # Every patch switch lives on one screen now, so the cycling checks
+        # belong there rather than on the root menu.
         settings.write_text('')
-        idx = next(i for i, it in enumerate(items) if it.key == 'suggestion_height')
-        _, _, reload_ = handle(st, items, idx, 'right')
+        screen = screen_patch_settings(st)
+        rows = screen.build(st)
+        check('every registered switch has a row',
+              {r.key for r in rows if r.kind == 'cycle'} == set(ps.CHOICES),
+              {r.key for r in rows if r.kind == 'cycle'} ^ set(ps.CHOICES))
+        check('every switch row carries help',
+              all(r.help for r in rows if r.kind == 'cycle'),
+              [r.key for r in rows if r.kind == 'cycle' and not r.help])
+
+        idx = next(i for i, r in enumerate(rows) if r.key == 'suggestion_height')
+        _, _, reload_ = m.handle(screen, st, rows, idx, 'right')
         check('cycling asks for a reload', reload_)
         check('cycle wrote half', ps.get('suggestion_height', settings) == 'half',
               ps.get('suggestion_height', settings))
-        handle(st, items, idx, 'right')
+        m.handle(screen, st, rows, idx, 'right')
         check('cycle advanced to full', ps.get('suggestion_height', settings) == 'full')
-        handle(st, items, idx, 'left')
+        m.handle(screen, st, rows, idx, 'left')
         check('left steps back', ps.get('suggestion_height', settings) == 'half')
 
-        idx = next(i for i, it in enumerate(items) if it.key == 'wd_command')
-        handle(st, items, idx, 'enter')
+        idx = next(i for i, r in enumerate(rows) if r.key == 'wd_command')
+        m.handle(screen, st, rows, idx, 'enter')
         check('enter cycles too', ps.get('wd_command', settings) == 'on')
+
+        # A click on a switch row advances it, the same as enter.
+        rmap: dict[int, int] = {}
+        m.render(screen, st, rows, 0, rmap)
+        line_no = next(n for n, i in rmap.items() if i == idx)
+        m.handle(screen, st, rows, 0, Mouse(0, 5, line_no, False), rmap)
+        check('a click advances a switch', ps.get('wd_command', settings) == 'off',
+              ps.get('wd_command', settings))
 
         # the rendered value follows the file
         st = state()
-        items = build_items(st)
-        row = next(it for it in items if it.key == 'wd_command')
-        check('value reflects the file', row.value(st) == 'on', row.value(st))
+        rows = screen_patch_settings(st).build(st)
+        row = next(r for r in rows if r.key == 'suggestion_height')
+        check('value reflects the file', row.value(st) == 'half', row.value(st))
 
         # -- rendering -----------------------------------------------------
         out = '\n'.join(render(st, items, first_selectable(items)))
@@ -875,7 +914,10 @@ def _selfcheck() -> int:
         check('separators drawn', '─' * 10 in out)
         check('help line drawn', 'system-prompts/' in out)
         check('cycle rows show arrows', '‹›' in out)
-        check('patch note shown for missing patch', 'patch not installed' in out, out[:400])
+        sw = '\n'.join(m.render(screen_patch_settings(st), st,
+                                 screen_patch_settings(st).build(st), 0))
+        check('patch note shown for a switch with no patch',
+              'patch not installed' in sw, sw[:600])
 
         # -- key decoding end to end --------------------------------------
         src = FakeKeys(['down', 'down', 'up', 'enter', 'q'])
@@ -899,21 +941,14 @@ def _selfcheck() -> int:
         check('separators are unmapped', all(n not in row_map for n in sep_lines))
         check('header is unmapped', 0 not in row_map and 1 not in row_map)
 
-        # A click on an entry selects it; on a cycle row it also advances the
-        # value, which is the one case that can be exercised without launching
-        # a subprocess.
-        settings.write_text('')
-        idx = next(i for i, it in enumerate(items) if it.key == 'suggestion_height')
-        line_no = next(n for n, i in row_map.items() if i == idx)
-        pos, keep, reload_ = handle(st, items, 0, Mouse(0, 5, line_no, False), row_map)
-        check('click selects the clicked row', pos == idx, pos)
-        check('click on a cycle row advances it',
-              ps.get('suggestion_height', settings) == 'half',
-              ps.get('suggestion_height', settings))
-        check('click asks for a reload', reload_ and keep)
+        # Clicking a row acts on it, which on this screen means launching a
+        # subprocess or opening a submenu. The click-to-act path is exercised
+        # on the switch screen above, where advancing a value is the whole
+        # effect; here the interesting half is what a click must *not* do.
+        idx = next(i for i, it in enumerate(items) if it.key == 'patchsettings')
 
-        # A click anywhere else is inert — it must not move the cursor and
-        # must not act.
+        # A click anywhere that is not a row is inert — it must not move the
+        # cursor and must not act.
         before = ps.get('suggestion_height', settings)
         for dead in (0, 1, sep_lines[0] if sep_lines else len(lines) - 1, len(lines) - 1):
             pos2, keep2, reload2 = handle(st, items, idx, Mouse(0, 3, dead, False), row_map)
@@ -921,6 +956,8 @@ def _selfcheck() -> int:
                   (pos2, keep2, reload2) == (idx, True, False), (pos2, keep2, reload2))
         check('inert clicks changed no setting',
               ps.get('suggestion_height', settings) == before)
+
+        line_no = next(n for n, i in row_map.items() if i == idx)
 
         # A click far below the menu maps to nothing.
         pos3, _, _ = handle(st, items, idx, Mouse(0, 0, 999, False), row_map)
@@ -944,6 +981,53 @@ def _selfcheck() -> int:
         check('click bytes decode to a Mouse', isinstance(ev, Mouse), ev)
         pos5, _, _ = handle(st, items, 0, ev, row_map)
         check('decoded click reaches the entry', pos5 == idx, pos5)
+
+        # -- submenus are screens too --------------------------------------
+        # Every submenu used to end in `input()` and a digit. The point of the
+        # rewrite is that they are now the same kind of object as the root
+        # menu, so the same navigation checks apply to all of them.
+        st = state()
+        for name, screen in (('prompts', screen_prompts(st)),
+                             ('display', screen_display(st)),
+                             ('patches', screen_patches(st))):
+            rows = screen.build(st)
+            check(f'{name} builds rows', len(rows) > 0)
+            check(f'{name} has a selectable row', any(r.selectable for r in rows))
+
+            # Navigation must never come to rest on a fact or a rule.
+            dead = [i for i, r in enumerate(rows) if not r.selectable]
+            pos = m.first_selectable(rows)
+            for _ in range(len(rows) * 2):
+                pos, _, _ = m.handle(screen, st, rows, pos, 'down')
+                check(f'{name}: never lands on an unselectable row', pos not in dead, pos)
+
+            # Back closes, and nothing else does.
+            idx = next(i for i, r in enumerate(rows) if r.key == 'back')
+            _, keep, _ = m.handle(screen, st, rows, idx, 'enter')
+            check(f'{name}: back closes the screen', keep is False)
+
+            # The mouse mapping is built by the same pass that draws.
+            row_map2: dict[int, int] = {}
+            lines2 = m.render(screen, st, rows, m.first_selectable(rows), row_map2)
+            check(f'{name}: title drawn', any(screen.title in l for l in lines2))
+            check(f'{name}: every selectable row mapped',
+                  len(row_map2) == len([r for r in rows if r.selectable]))
+            for line_no, ri in row_map2.items():
+                check(f'{name}: mapped line holds its row',
+                      rows[ri].label in lines2[line_no], lines2[line_no])
+            check(f'{name}: esc leaves', m.handle(screen, st, rows, 0, 'esc')[1] is False)
+
+        # the patch screen names the patches that are actually there
+        rows = screen_patches(st).build(st)
+        check('patch screen lists the patches',
+              any('00-a.js' == r.label for r in rows), [r.label for r in rows])
+
+        # the environment screen offers what the launcher accepts, no more
+        rows = screen_display(st).build(st)
+        env_names = [r.key[4:] for r in rows if r.key.startswith('env:')]
+        check('environment screen lists variables', len(env_names) > 5, env_names)
+        check('every environment row is a launcher variable',
+              all(n.startswith('KIMI') for n in env_names), env_names)
 
         # -- suggestion levels mirror the patch's arithmetic ---------------
         # The patch computes: half = min(floor(rows/2), max(1, rows-5)),

@@ -6,7 +6,11 @@ here is configuration Kimi already supports and simply does not document.
 
     python3 lib/config-menu.py             # interactive
     python3 lib/config-menu.py --dry-run   # show the diff, write nothing
-    python3 lib/config-menu.py --selfcheck # prove the TOML editing is lossless
+    python3 lib/config-menu.py --selfcheck # prove the editing and the screens
+
+Every screen here is a `menu.Screen`: arrow keys, wheel and click, with digits
+kept only as shortcuts. A path and a number are still typed, because no list
+can offer them; everything else is a row.
 
 Two things drove the design.
 
@@ -27,8 +31,10 @@ fine and does nothing at all, which is the worst possible failure — hence the
 constants below are the file spelling, not the internal one.
 """
 
+import contextlib
 import difflib
 import importlib.util
+import io
 import re
 import shutil
 import subprocess
@@ -42,6 +48,11 @@ HERE = Path(__file__).parent
 CONFIG = Path.home() / '.kimi-code' / 'config.toml'
 KIMI_BIN = Path.home() / '.kimi-code' / 'bin' / 'kimi'
 
+sys.path.insert(0, str(HERE.resolve()))
+
+import menu as m                                             # noqa: E402
+from menu import Item                                        # noqa: E402
+
 # TOML spellings. See the module docstring: these are snake_case on purpose.
 K_BUILTIN_SKILLS = 'builtin_product_skills'
 K_MERGE_SKILLS = 'merge_all_available_skills'
@@ -52,6 +63,16 @@ S_LOOP = 'loop_control'
 K_ATTEMPTS = 'max_attempts_per_step'
 K_ATTEMPTS_OLD = 'max_retries_per_step'      # deprecated, renamed on sight
 K_RESERVED = 'reserved_context_size'
+S_THINKING = 'thinking'
+K_THINK_ENABLED = 'enabled'
+K_THINK_EFFORT = 'effort'
+K_THINK_FORCED = 'forced_effort'
+K_THINK_KEEP = 'keep'
+
+# The levels Kimi's own profiles name. `minimal` is deliberately absent: it
+# appears in no profile in 0.36.0, and offering a level the binary never uses
+# would be a menu entry that quietly does nothing.
+EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
 
 # From PermissionModeSchema = _enum(["yolo","manual","auto"]) in the bundle.
 PERMISSION_MODES = ['yolo', 'manual', 'auto']
@@ -408,11 +429,26 @@ def validate(path: Path) -> tuple[bool, str]:
 # --------------------------------------------------------------------------
 
 def ask(prompt: str) -> str:
+    """One line of free text, for the few values no list can offer.
+
+    A path and a number cannot be picked from a list, so those two prompts
+    stay. Everything else is a row now. Wrapped so a closed stdin — the state
+    every smoke test and `--dry-run` runs in — reads as "nothing entered"
+    rather than as an exception thrown out of a menu row.
+    """
     try:
         return input(prompt).strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        return 'q'
+        return ''
+
+
+def pause(*lines: str) -> None:
+    """Say something the next repaint would otherwise wipe out."""
+    print()
+    for line in lines:
+        print(line)
+    ask('\n   [enter] back ')
 
 
 def fmt_state(value, explicit: bool) -> str:
@@ -423,244 +459,621 @@ def fmt_state(value, explicit: bool) -> str:
     return text if explicit else f'{text}  (Kimi default, not set)'
 
 
-def menu_tools(doc: TomlLines, data: dict):
-    try:
-        rows = tool_rows()
-    except FileNotFoundError as e:
-        print(f'\nno extracted bundle at {e}. Run: ./kimi-patch.sh --extract\n')
-        return
-    current = set((data.get(S_TOOLS) or {}).get('disabled') or [])
+class Editing:
+    """The file under the cursor: its lines, and the parsed view of them.
+
+    The screens read `data` and write through `doc`. Nothing reaches the disk
+    until the Write row runs `commit`, so the parsed view has to be rebuilt
+    from the edited lines after every change rather than re-read from the file
+    — which is exactly what `reload` on each screen asks for.
+    """
+
+    def __init__(self, path: Path, doc: TomlLines, dry_run: bool = False):
+        self.path = path
+        self.doc = doc
+        self.dry_run = dry_run
+        self.rc = 0
+        self.data: dict = {}
+        self.refresh()
+
+    def refresh(self) -> 'Editing':
+        self.data = tomllib.loads(self.doc.text())
+        return self
+
+
+def sub(screen: m.Screen, st: Editing) -> None:
+    """Run a submenu, then let the caller repaint on the way out."""
+    m.loop(screen, st)
+
+
+def screen_tools(st: Editing, rows: list[tuple[str, int]]) -> m.Screen:
+    """Which builtin tools Kimi is told not to load.
+
+    The catalogue is handed in rather than read here. It comes from the
+    extracted bundle, which may be missing, and the caller is the only place
+    that can say so usefully — a screen that has already been opened has no
+    good way to report that it has nothing to show.
+
+    The selection lives in this closure until Save writes it, so leaving with
+    Back really does discard it, the way it did when this was a digit menu.
+    """
     known = {n for n, _ in rows}
+    current = set((st.data.get(S_TOOLS) or {}).get('disabled') or [])
     # Names disabled in the file that are no longer builtin tools: keep them,
     # but say so rather than dropping them silently.
     stale = sorted(current - known)
 
-    while True:
-        print('\n  Disable builtin tools')
-        print('  Each description ships in every request, so an unused tool is a')
-        print('  fixed per-turn tax. Load-bearing tools are not offered.\n')
-        for i, (name, tok) in enumerate(rows, 1):
-            mark = 'x' if name in current else ' '
-            print(f'   {i:>2}  [{mark}] {name:<22}{tok:>6} tokens')
+    def build(s: Editing) -> list[Item]:
+        items = [Item('info', 'Each description ships in every request, so an '
+                              'unused tool is a fixed per-turn tax.'),
+                 Item('info', 'Load-bearing tools are not offered.'),
+                 Item('sep')]
+        for name, tok in rows:
+            items.append(Item(
+                'action', name,
+                (lambda n, t: lambda x:
+                 f'[{"x" if n in current else " "}] {t:>6} tokens')(name, tok),
+                key=f'tool:{name}', help='enter toggles it'))
+        items.append(Item('sep'))
         if stale:
-            print(f'\n   also disabled, unknown to this build: {", ".join(stale)}')
+            items.append(Item('info', 'also disabled, unknown to this build: '
+                                      + ', '.join(stale)))
         saved = sum(t for n, t in rows if n in current)
-        print(f'\n   selected: {len(current)}   saving about {saved} tokens per turn')
-        print('   number toggles · a=all · n=none · s=save · q=back')
-        choice = ask('   > ').lower()
+        items.append(Item('info', f'selected: {len(current)}, saving about '
+                                  f'{saved} tokens per turn'))
+        items += [
+            Item('action', 'Disable all', lambda x: '', key='all'),
+            Item('action', 'Disable none', lambda x: '', key='none'),
+            Item('action', 'Save', lambda x: 'keep this selection', key='save'),
+            Item('action', 'Back', lambda x: 'discard the changes', key='back'),
+        ]
+        return items
 
-        if choice in ('q', ''):
-            return
-        if choice == 'a':
-            current |= known
-            continue
-        if choice == 'n':
-            current -= known
-            continue
-        if choice == 's':
-            doc.set(S_TOOLS, 'disabled', lit(sorted(current | set(stale))))
-            return
-        if choice.isdigit() and 1 <= int(choice) <= len(rows):
-            name = rows[int(choice) - 1][0]
-            current.symmetric_difference_update({name})
-            continue
-        print('   ?')
+    def act(s: Editing, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key == 'save':
+            s.doc.set(S_TOOLS, 'disabled', lit(sorted(current | set(stale))))
+            return False
+        if item.key == 'all':
+            current.update(known)
+        elif item.key == 'none':
+            current.difference_update(known)
+        elif item.key.startswith('tool:'):
+            current.symmetric_difference_update({item.key[5:]})
+        return True
 
-
-def menu_choice(title: str, body: list[str], options: list[str],
-                current, helps: dict | None = None, recommended=None):
-    """Pick one of `options`, or return None to leave it to Kimi."""
-    while True:
-        print(f'\n  {title}')
-        for line in body:
-            print(f'  {line}')
-        print()
-        for i, opt in enumerate(options, 1):
-            mark = '*' if opt == current else ' '
-            hint = f'  — {helps[opt]}' if helps and opt in helps else ''
-            star = '  [recommended]' if recommended is not None and opt == recommended else ''
-            print(f'   {i}  {mark} {opt}{hint}{star}')
-        print('   u  unset (leave it to Kimi)')
-        print('   q  back')
-        choice = ask('   > ').lower()
-        if choice in ('q', ''):
-            return ('keep', None)
-        if choice == 'u':
-            return ('unset', None)
-        if choice.isdigit() and 1 <= int(choice) <= len(options):
-            return ('set', options[int(choice) - 1])
-        print('   ?')
+    return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
+                    title='Disable builtin tools')
 
 
-def menu_bool(doc: TomlLines, key: str, title: str, body: list[str], data: dict):
-    value, explicit = shown(data, key)
+def screen_choice(st: Editing, title: str, body: list[str], options: list[str],
+                  current, apply, helps: dict | None = None,
+                  recommended=None) -> m.Screen:
+    """Pick one of `options`, or hand the setting back to Kimi.
+
+    `apply(st, picked)` writes the choice, with `None` for unset. Picking
+    closes the screen, because a screen whose only question has been answered
+    has nothing left to offer.
+    """
+
+    def mark(opt) -> str:
+        marks = []
+        if opt == current:
+            marks.append('current')
+        if recommended is not None and opt == recommended:
+            marks.append('recommended')
+        return ', '.join(marks)
+
+    def build(s: Editing) -> list[Item]:
+        items = [Item('info', line) for line in body if line]
+        items.append(Item('sep'))
+        for opt in options:
+            items.append(Item('action', opt,
+                              (lambda o: lambda x: (helps or {}).get(o, ''))(opt),
+                              (lambda o: lambda x: mark(o))(opt),
+                              key=f'set:{opt}'))
+        items += [
+            Item('action', 'unset (leave it to Kimi)', lambda x: '',
+                 lambda x: 'current' if current is None else '', key='unset'),
+            Item('sep'),
+            Item('action', 'Back', lambda x: 'change nothing', key='back'),
+        ]
+        return items
+
+    def act(s: Editing, item: Item) -> bool:
+        if item.key == 'unset':
+            apply(s, None)
+        elif item.key.startswith('set:'):
+            apply(s, item.key[4:])
+        return False
+
+    return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
+                    title=title)
+
+
+def screen_bool(st: Editing, key: str, title: str, body: list[str]) -> m.Screen:
+    value, explicit = shown(st.data, key)
     rec = RECOMMENDED.get(key)
-    action, picked = menu_choice(
-        title, body, ['on', 'off'],
-        ('on' if value else 'off') if explicit else None,
-        recommended=None if rec is None else ('on' if rec else 'off'))
-    if action == 'set':
-        doc.set('', key, lit(picked == 'on'))
-    elif action == 'unset':
-        doc.remove('', key)
+
+    def apply(s: Editing, picked) -> None:
+        if picked is None:
+            s.doc.remove('', key)
+        else:
+            s.doc.set('', key, lit(picked == 'on'))
+
+    return screen_choice(st, title, body, ['on', 'off'],
+                         ('on' if value else 'off') if explicit else None,
+                         apply,
+                         recommended=None if rec is None else ('on' if rec else 'off'))
 
 
-def menu_extra_dirs(doc: TomlLines, data: dict):
+def screen_permission(st: Editing) -> m.Screen:
+    value, explicit = shown(st.data, K_PERMISSION)
+
+    def apply(s: Editing, picked) -> None:
+        if picked is None:
+            s.doc.remove('', K_PERMISSION)
+        else:
+            s.doc.set('', K_PERMISSION, lit(picked))
+
+    return screen_choice(st, 'Permission mode', [
+        'What Kimi does before it runs a tool call.',
+        'yolo skips the prompt entirely — convenient, and it means',
+        'shell commands run without a confirmation step.',
+    ], PERMISSION_MODES, value if explicit else None, apply, PERMISSION_HELP,
+        recommended=RECOMMENDED.get(K_PERMISSION))
+
+
+def screen_extra_dirs(st: Editing) -> m.Screen:
     """Additional directories to search for skills.
 
     The one setting in this group with a real effect: it mounts existing skill
     collections without copying them. Kimi expands `~` and resolves a relative
     path against the project root, so both forms are accepted here unchanged.
     """
-    dirs = list(data.get(K_EXTRA_SKILL_DIRS) or [])
-    while True:
-        print('\n  Extra skill directories')
-        print('  Mount skill collections that live outside ~/.kimi-code/skills.')
-        print('  `~` is expanded; a relative path resolves against the project root.')
-        print()
-        if dirs:
-            for i, d in enumerate(dirs, 1):
-                probe = Path(d).expanduser()
-                note = ''
-                if d.startswith('~') or d.startswith('/'):
-                    note = '' if probe.is_dir() else '   (does not exist yet)'
-                else:
-                    note = '   (relative to the project root)'
-                print(f'   {i:>2}  {d}{note}')
-        else:
-            print('   none configured')
-        print('\n   a=add · number removes · s=save · q=back')
-        choice = ask('   > ').lower()
+    dirs = list(st.data.get(K_EXTRA_SKILL_DIRS) or [])
 
-        if choice in ('q', ''):
-            return
-        if choice == 's':
+    def state_of(d: str) -> str:
+        if d.startswith('~') or d.startswith('/'):
+            return '' if Path(d).expanduser().is_dir() else '(does not exist yet)'
+        return '(relative to the project root)'
+
+    def build(s: Editing) -> list[Item]:
+        items = [Item('info', 'Mount skill collections that live outside '
+                              '~/.kimi-code/skills.'),
+                 Item('info', '`~` is expanded; a relative path resolves against '
+                              'the project root.'),
+                 Item('sep')]
+        for d in dirs:
+            items.append(Item('action', d,
+                              (lambda p: lambda x: state_of(p))(d),
+                              key=f'drop:{d}', help='enter removes it'))
+        if not dirs:
+            items.append(Item('info', 'none configured'))
+        items += [
+            Item('sep'),
+            Item('action', 'Add a directory', lambda x: '', key='add'),
+            Item('action', 'Save', lambda x: 'keep this list', key='save'),
+            Item('action', 'Back', lambda x: 'discard the changes', key='back'),
+        ]
+        return items
+
+    def act(s: Editing, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key == 'save':
             if dirs:
-                doc.set('', K_EXTRA_SKILL_DIRS, lit(dirs))
+                s.doc.set('', K_EXTRA_SKILL_DIRS, lit(dirs))
             else:
-                doc.remove('', K_EXTRA_SKILL_DIRS)
-            return
-        if choice == 'a':
-            raw = ask('   path: ').strip()
+                s.doc.remove('', K_EXTRA_SKILL_DIRS)
+            return False
+        if item.key == 'add':
+            raw = ask('   path: ')
             if raw and raw not in dirs:
                 dirs.append(raw)
+        elif item.key.startswith('drop:'):
+            d = item.key[5:]
+            if d in dirs:
+                dirs.remove(d)
+        return True
+
+    return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
+                    title='Extra skill directories')
+
+
+def screen_loop(st: Editing) -> m.Screen:
+    """Attempts per step, and the context held back for the answer.
+
+    Both are numbers, so both still ask for a line of text. What changed is
+    that the two settings are rows: you can look at one without being walked
+    through the other, an answer that is not a number leaves the file alone
+    instead of being carried into the next question, and ‹› hands a setting
+    back to Kimi — the one thing the old prompt had no way of expressing.
+    """
+    message = ''
+
+    def reset(s: Editing, item: Item, forward: bool) -> None:
+        key = item.key[4:]
+        nonlocal message
+        s.doc.remove(S_LOOP, key)
+        message = f'{key} back to Kimi\'s default'
+
+    def build(s: Editing) -> list[Item]:
+        rows = [Item('info', 'How many attempts a single step gets, and how much '
+                             'of the'),
+                Item('info', 'context window is held back for the answer.')]
+        if message:
+            rows.append(Item('info', message))
+        rows.append(Item('sep'))
+        for key in (K_ATTEMPTS, K_RESERVED):
+            rows.append(Item('action', key,
+                             (lambda k: lambda x: fmt_state(*shown(x.data, k, S_LOOP)))(key),
+                             key=f'num:{key}', on_cycle=reset,
+                             help='enter sets it, ‹› hands it back to Kimi'))
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: Editing, item: Item) -> bool:
+        nonlocal message
+        message = ''
+        if item.key == 'back':
+            return False
+        if item.key.startswith('num:'):
+            key = item.key[4:]
+            cur = shown(s.data, key, S_LOOP)[0]
+            raw = ask(f'   {key} [{cur}] (enter keeps it): ')
+            if raw.isdigit():
+                s.doc.set(S_LOOP, key, lit(int(raw)))
+                message = f'{key} = {raw}'
+            elif raw:
+                message = f'not written — {raw!r} is not a number'
+        return True
+
+    return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
+                    title='Loop control')
+
+
+def toolsets_path() -> Path:
+    """Where the named tool sets live.
+
+    Deliberately not in `config.toml`. That file is Kimi's, its schema is
+    strict, and `kimi doctor` rejects a key it does not know — a preset stored
+    there would fail validation the moment anyone ran it. This is tweakkimi's
+    own file, in tweakkimi's own format, next to the other one.
+    """
+    return HERE.parent / 'toolsets.conf'
+
+
+def read_toolsets(path: Path | None = None) -> dict:
+    """`name = ToolA,ToolB` per line. Comments and blanks are skipped."""
+    path = path or toolsets_path()
+    out = {}
+    try:
+        text = path.read_text()
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
             continue
-        if choice.isdigit() and 1 <= int(choice) <= len(dirs):
-            dirs.pop(int(choice) - 1)
-            continue
-        print('   ?')
+        name, _, tools = line.partition('=')
+        out[name.strip()] = [t.strip() for t in tools.split(',') if t.strip()]
+    return out
 
 
-def menu_loop(doc: TomlLines, data: dict):
-    section = data.get(S_LOOP) or {}
-    print('\n  Loop control')
-    print('  How many attempts a single step gets, and how much of the context')
-    print('  window is held back for the answer.\n')
-    for key in (K_ATTEMPTS, K_RESERVED):
-        cur = section.get(key, KIMI_DEFAULTS[key])
-        raw = ask(f'   {key} [{cur}] (enter keeps, q aborts): ')
-        if raw.lower() == 'q':
-            return
-        if raw == '':
-            continue
-        if not raw.isdigit():
-            print('   not a number — skipped')
-            continue
-        doc.set(S_LOOP, key, lit(int(raw)))
+def write_toolsets(sets: dict, path: Path | None = None) -> None:
+    path = path or toolsets_path()
+    lines = ['# Named tool sets for tweakkimi. Applying one writes its list to',
+             '# `[tools] disabled` in config.toml; nothing else here is read by Kimi.',
+             '# One `name = Tool, Tool` per line.', '']
+    for name in sorted(sets):
+        lines.append(f'{name} = {", ".join(sets[name])}')
+    path.write_text('\n'.join(lines) + '\n')
 
 
-def render(doc: TomlLines, path: Path):
-    data = tomllib.loads(doc.text())
-    disabled = (data.get(S_TOOLS) or {}).get('disabled') or []
-    loop = data.get(S_LOOP) or {}
+def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
+    """Named sets of disabled tools, applied in one keystroke.
 
-    b_skills, b_set = shown(data, K_BUILTIN_SKILLS)
-    m_skills, m_set = shown(data, K_MERGE_SKILLS)
-    perm, p_set = shown(data, K_PERMISSION)
+    tweakcc builds this out of an eleven-step splice into the binary. Here it
+    is a file and one config key, because Kimi already evaluates `[tools]
+    disabled` against the catalogue the model is handed — the feature exists,
+    only the switching between several of them does not.
+    """
+    path = path or toolsets_path()
+    message = ''
 
-    extra = data.get(K_EXTRA_SKILL_DIRS) or []
+    def build(s: Editing) -> list[Item]:
+        sets = read_toolsets(path)
+        current = sorted((s.data.get(S_TOOLS) or {}).get('disabled') or [])
+        rows = [Item('info', 'A set is a list of tools to disable. Applying one '
+                             'replaces the current list.'),
+                Item('info', f'now disabled: {", ".join(current) if current else "none"}')]
+        if message:
+            rows.append(Item('info', message))
+        rows.append(Item('sep'))
+        for name in sorted(sets):
+            same = sorted(sets[name]) == current
+            rows.append(Item('action', name,
+                             (lambda tools, is_now: lambda x:
+                              f'{len(tools)} tool(s)' + ('   ← in use' if is_now else ''))(
+                                 sets[name], same),
+                             key=f'use:{name}',
+                             help='enter applies it, ‹› deletes it',
+                             on_cycle=drop))
+        if not sets:
+            rows.append(Item('info', 'none saved yet'))
+        rows += [Item('sep'),
+                 Item('action', 'Save what is disabled now', lambda x: '', key='save',
+                      help='Names the current list so you can come back to it.'),
+                 Item('action', 'Back', lambda x: '', key='back')]
+        return rows
 
-    print('\ntweakkimi — Kimi configuration')
-    print(f'{path}\n')
-    print(f'   1  Disable builtin tools        {len(disabled)} disabled')
-    print(f'   2  Builtin product skills       {fmt_state(b_skills, b_set)}')
-    print(f'   3  Merge all skill directories  {fmt_state(m_skills, m_set)}'
-          '   [no effect in 0.36.0]')
-    extra_state = f'{len(extra)} configured' if extra else 'none'
-    print(f'   4  Extra skill directories      {extra_state}')
-    print(f'   5  Permission mode              {fmt_state(perm, p_set)}')
-    print(f'   6  Loop control                 '
-          f'{loop.get(K_ATTEMPTS, KIMI_DEFAULTS[K_ATTEMPTS])} attempts, '
-          f'{loop.get(K_RESERVED, KIMI_DEFAULTS[K_RESERVED])} reserved')
-    # Environment-only settings (fullscreen, transcript window) arrive here
-    # once the launcher exists; they cannot live in config.toml.
-    print()
-    print('   w  write changes      q  quit without writing')
-    return data
+    def drop(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        sets = read_toolsets(path)
+        name = item.key[4:]
+        if sets.pop(name, None) is not None:
+            write_toolsets(sets, path)
+            message = f'deleted "{name}" — config.toml is unchanged'
+
+    def act(s: Editing, item: Item) -> bool:
+        nonlocal message
+        message = ''
+        if item.key == 'back':
+            return False
+        if item.key == 'save':
+            current = sorted((s.data.get(S_TOOLS) or {}).get('disabled') or [])
+            if not current:
+                message = 'nothing to save — no tool is disabled right now'
+                return True
+            name = ask('   name for this set: ').strip()
+            if not name:
+                return True
+            if '=' in name or ',' in name:
+                message = 'not saved — a name cannot contain "=" or ","'
+                return True
+            sets = read_toolsets(path)
+            sets[name] = current
+            write_toolsets(sets, path)
+            message = f'saved "{name}" with {len(current)} tool(s)'
+        elif item.key.startswith('use:'):
+            name = item.key[4:]
+            tools = read_toolsets(path).get(name, [])
+            if tools:
+                s.doc.set(S_TOOLS, 'disabled', lit(sorted(tools)))
+            else:
+                s.doc.remove(S_TOOLS, 'disabled')
+            message = f'applied "{name}" — write the file to keep it'
+        return True
+
+    return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
+                    title='Tool sets')
+
+
+def screen_thinking(st: Editing) -> m.Screen:
+    """How hard the model thinks, and whether its thinking is carried forward.
+
+    This is the live lever, and finding that out took a detour worth recording.
+    `KIMI_MODEL_THINKING_EFFORT` looks like the obvious switch and appears in
+    the old engine's `resolveKimiEnvThinkingEffort`, which nothing in
+    `agent-core-v2` calls. It works anyway, but by another route: the `thinking`
+    config section registers that variable as the environment binding for
+    `forced_effort`, and `agent-core-v2`'s `resolveThinkingEffortForModel` reads
+    the section. So the file below and that variable are the same setting seen
+    from two sides — which is why both are offered rather than one.
+
+    `forced_effort` bypasses the model's own support list where `effort` does
+    not; Kimi still clamps a level the model cannot do, so neither can ask for
+    something the provider would reject.
+    """
+    message = ''
+
+    def reset(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        key = item.key.split(':', 1)[1]
+        s.doc.remove(S_THINKING, key)
+        message = f'{key} back to Kimi\'s default'
+
+    def step_effort(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        s.refresh()
+        key = item.key[4:]
+        value, explicit = shown(s.data, key, S_THINKING)
+        here = EFFORTS.index(value) if explicit and value in EFFORTS else -1
+        s.doc.set(S_THINKING, key, lit(EFFORTS[(here + (1 if forward else -1)) % len(EFFORTS)]))
+        message = ''
+
+    def build(s: Editing) -> list[Item]:
+        rows = [Item('info', 'Reasoning effort. `effort` is the ordinary level;'),
+                Item('info', '`forced_effort` overrides it and ignores the '
+                             'model\'s support list.')]
+        if message:
+            rows.append(Item('info', message))
+        rows.append(Item('sep'))
+        rows.append(Item('cycle', 'enabled',
+                         lambda x: fmt_state(*shown(x.data, K_THINK_ENABLED, S_THINKING)),
+                         key='bool:' + K_THINK_ENABLED, choices=['on', 'off'],
+                         help='Off stops the model thinking at all.'))
+        for key in (K_THINK_EFFORT, K_THINK_FORCED):
+            rows.append(Item('action', key,
+                             (lambda k: lambda x: fmt_state(*shown(x.data, k, S_THINKING)))(key),
+                             key=f'eff:{key}', on_cycle=step_effort,
+                             help='‹› picks a level, enter hands it back to Kimi'))
+        rows.append(Item('action', K_THINK_KEEP,
+                         lambda x: fmt_state(*shown(x.data, K_THINK_KEEP, S_THINKING)),
+                         key=f'txt:{K_THINK_KEEP}', on_cycle=reset,
+                         help='Whether earlier thinking is re-sent. `all` keeps it, '
+                              '`off` drops it. Keeping it costs tokens.'))
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: Editing, item: Item) -> bool:
+        nonlocal message
+        message = ''
+        if item.key == 'back':
+            return False
+        if item.key.startswith('eff:'):
+            # Enter is the way back to Kimi's own choice, because a level you
+            # want is one ‹› away and a level you no longer want has nowhere
+            # else to go.
+            key = item.key[4:]
+            s.doc.remove(S_THINKING, key)
+            message = f'{key} back to Kimi\'s default'
+        elif item.key.startswith('txt:'):
+            key = item.key[4:]
+            cur = shown(s.data, key, S_THINKING)[0]
+            raw = ask(f'   {key} [{cur}] (enter keeps it): ')
+            if raw:
+                s.doc.set(S_THINKING, key, lit(raw))
+                message = f'{key} = {raw}'
+        return True
+
+    def cyc(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        # Read the document, not the view it was parsed from. The loop
+        # refreshes after every action, so in the running menu the two agree —
+        # but a second arrow press within one action would otherwise step from
+        # the value before the first, and walk in place.
+        s.refresh()
+        if item.key.startswith('bool:'):
+            key = item.key[5:]
+            value, explicit = shown(s.data, key, S_THINKING)
+            s.doc.set(S_THINKING, key, lit(not (value is True) if explicit else False))
+            message = ''
+
+    return m.Screen(build, activate=act, cycle=cyc, reload=lambda s: s.refresh(),
+                    title='Reasoning')
+
+
+def header(st: Editing) -> list[str]:
+    return ['', 'tweakkimi — Kimi configuration', str(st.path)]
+
+
+def screen_main(st: Editing) -> m.Screen:
+    """The top level. Its row keys are the values `--item` accepts.
+
+    Keeping them as the digits the old menu printed is what makes `--item 5`
+    still open the permission screen: the main menu of tweakkimi passes those
+    digits, and nothing else has to know they came from a numbered list.
+    """
+
+    def build(s: Editing) -> list[Item]:
+        disabled = (s.data.get(S_TOOLS) or {}).get('disabled') or []
+        extra = s.data.get(K_EXTRA_SKILL_DIRS) or []
+        loop = s.data.get(S_LOOP) or {}
+        return [
+            Item('submenu', 'Disable builtin tools',
+                 lambda x: f'{len(disabled)} disabled', key='1',
+                 help='Every tool description ships in every request.'),
+            Item('submenu', 'Builtin product skills',
+                 lambda x: fmt_state(*shown(x.data, K_BUILTIN_SKILLS)), key='2',
+                 help='Kimi\'s own product skills, on or off.'),
+            Item('submenu', 'Merge skill directories',
+                 lambda x: fmt_state(*shown(x.data, K_MERGE_SKILLS))
+                 + '   [no effect in 0.36.0]', key='3'),
+            Item('submenu', 'Extra skill directories',
+                 lambda x: f'{len(extra)} configured' if extra else 'none',
+                 key='4', help='Mount skill collections from elsewhere.'),
+            Item('submenu', 'Permission mode',
+                 lambda x: fmt_state(*shown(x.data, K_PERMISSION)), key='5',
+                 help='What Kimi does before it runs a tool call.'),
+            Item('submenu', 'Loop control',
+                 lambda x: (f'{loop.get(K_ATTEMPTS, KIMI_DEFAULTS[K_ATTEMPTS])} '
+                            f'attempts, '
+                            f'{loop.get(K_RESERVED, KIMI_DEFAULTS[K_RESERVED])} '
+                            f'reserved'), key='6'),
+            Item('submenu', 'Reasoning',
+                 lambda x: (lambda t: ', '.join(f'{k}={v}' for k, v in t.items())
+                            if t else 'Kimi\'s own')(x.data.get(S_THINKING) or {}),
+                 key='7',
+                 help='How hard the model thinks, and whether thinking is re-sent.'),
+            Item('submenu', 'Tool sets',
+                 lambda x: (lambda n: f'{n} saved' if n else 'none saved')(
+                     len(read_toolsets())),
+                 key='8',
+                 help='Named lists of disabled tools, applied in one keystroke.'),
+            # Environment-only settings (fullscreen, transcript window) live in
+            # the launcher profile; they cannot live in config.toml.
+            Item('sep'),
+            Item('action', 'Write changes',
+                 lambda x: f'to {x.path.name}', key='w',
+                 help='Shows the diff first, and keeps a backup.'),
+            Item('action', 'Quit without writing', lambda x: '', key='q'),
+        ]
+
+    return m.Screen(build, header=header, activate=open_item,
+                    reload=lambda s: s.refresh(), help_line=m.HELP_ROOT)
+
+
+def open_item(st: Editing, item) -> bool:
+    """Open one top-level entry. Returns False when the menu should close.
+
+    Takes either an `Item` or the bare key behind it, because `--item` arrives
+    as a string long before there is a row to hand over.
+    """
+    key = item.key if isinstance(item, Item) else item
+    if key == 'q':
+        print('nothing written.')
+        return False
+    if key == 'w':
+        st.rc = 0 if commit(st.path, st.doc.text(), st.dry_run) else 1
+        return False
+    if key == '1':
+        try:
+            rows = tool_rows()
+        except FileNotFoundError as e:
+            pause(f'   no extracted bundle at {e}.',
+                  '   Run: ./kimi-patch.sh --extract')
+            return True
+        sub(screen_tools(st, rows), st)
+    elif key == '2':
+        sub(screen_bool(st, K_BUILTIN_SKILLS, 'Builtin product skills', [
+            'Kimi ships product skills (update-config, check-kimi-code-docs).',
+            'Turning them off removed two of three listed skills in testing.',
+        ]), st)
+    elif key == '3':
+        sub(screen_bool(st, K_MERGE_SKILLS, 'Merge all skill directories', [
+            'Whether every brand directory is searched for skills and agent',
+            'profiles, or only the first one that exists.',
+            'In 0.36.0 this changes nothing: each category lists exactly one',
+            'directory ("skills", "agents"), and with a single entry both',
+            'branches of pushBrandGroup do the same thing. There is no',
+            'context saving here either way. Kept in the menu so the setting',
+            'is visible rather than mysterious.',
+        ]), st)
+    elif key == '4':
+        sub(screen_extra_dirs(st), st)
+    elif key == '5':
+        sub(screen_permission(st), st)
+    elif key == '6':
+        sub(screen_loop(st), st)
+    elif key == '7':
+        sub(screen_thinking(st), st)
+    elif key == '8':
+        sub(screen_toolsets(st), st)
+    st.refresh()
+    return True
 
 
 def interactive(path: Path, dry_run: bool, first: str = '') -> int:
     original = path.read_text() if path.exists() else ''
-    doc = TomlLines(original)
+    st = Editing(path, TomlLines(original), dry_run)
 
     # The deprecated spelling is renamed on sight — Kimi warns about it on
     # every start and ignores the value.
-    if doc.rename(S_LOOP, K_ATTEMPTS_OLD, K_ATTEMPTS):
+    if st.doc.rename(S_LOOP, K_ATTEMPTS_OLD, K_ATTEMPTS):
         print(f'note: renamed {K_ATTEMPTS_OLD} to {K_ATTEMPTS} (deprecated spelling)')
+        st.refresh()
 
     # `--item N` jumps straight into one entry, so the top-level menu can offer
     # "Tools" and "Permissions" as separate doors without duplicating anything
     # behind them. Afterwards the normal loop takes over, which is what makes
     # the write prompt still reachable.
-    while True:
-        if first:
-            choice, first = first, ''
-            data = tomllib.loads(doc.text())
-        else:
-            data = render(doc, path)
-            choice = ask('\n > ').lower()
-        if choice == 'q':
-            print('nothing written.')
-            return 0
-        if choice == 'w':
-            return 0 if commit(path, doc.text(), dry_run) else 1
-        if choice == '1':
-            menu_tools(doc, data)
-        elif choice == '2':
-            menu_bool(doc, K_BUILTIN_SKILLS, 'Builtin product skills', [
-                'Kimi ships product skills (update-config, check-kimi-code-docs).',
-                'Turning them off removed two of three listed skills in testing.',
-            ], data)
-        elif choice == '3':
-            menu_bool(doc, K_MERGE_SKILLS, 'Merge all skill directories', [
-                'Whether every brand directory is searched for skills and agent',
-                'profiles, or only the first one that exists.',
-                '',
-                'In 0.36.0 this changes nothing: each category lists exactly one',
-                'directory ("skills", "agents"), and with a single entry both',
-                'branches of pushBrandGroup do the same thing. There is no',
-                'context saving here either way. Kept in the menu so the setting',
-                'is visible rather than mysterious.',
-            ], data)
-        elif choice == '4':
-            menu_extra_dirs(doc, data)
-        elif choice == '5':
-            value, explicit = shown(data, K_PERMISSION)
-            action, picked = menu_choice(
-                'Permission mode', [
-                    'What Kimi does before it runs a tool call.',
-                    'yolo skips the prompt entirely — convenient, and it means',
-                    'shell commands run without a confirmation step.',
-                ], PERMISSION_MODES, value if explicit else None, PERMISSION_HELP,
-                recommended=RECOMMENDED.get(K_PERMISSION))
-            if action == 'set':
-                doc.set('', K_PERMISSION, lit(picked))
-            elif action == 'unset':
-                doc.remove('', K_PERMISSION)
-        elif choice == '6':
-            menu_loop(doc, data)
-        else:
-            print(' ?')
+    if first and open_item(st, first) is False:
+        return st.rc
+    m.loop(screen_main(st), st)
+    return st.rc
 
 
 # --------------------------------------------------------------------------
@@ -771,6 +1184,379 @@ def _selfcheck():
     if CONFIG.exists():
         real = CONFIG.read_text()
         ok('real config round-trips', TomlLines(real).text() == real)
+
+    # ----------------------------------------------------------------------
+    # 13. the screens
+    #
+    # Every screen used to end in `input()` and a digit; they are Screens now,
+    # so the same navigation checks apply to all of them, in the same shape
+    # main-menu.py uses. Below that, one check per screen for what it actually
+    # writes — navigation being right is no comfort if the file ends up wrong.
+    # ----------------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def quiet():
+        """Screens talk to the user; the self-check only wants the verdict."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            yield
+
+    @contextlib.contextmanager
+    def answering(text: str):
+        """Stand in for the one prompt that still reads a line of text.
+
+        Substituting the module's `ask` is what lets the path and number rows
+        be driven with no terminal at all, the same way `FakeKeys` stands in
+        for the keyboard everywhere else.
+        """
+        global ask
+        real, ask = ask, lambda prompt: text
+        try:
+            yield
+        finally:
+            ask = real
+
+    CATALOGUE = [('Alpha', 900), ('Beta', 120), ('Gamma', 30)]
+
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / 'config.toml'
+        path.write_text(SAMPLE)
+
+        def editing(text=SAMPLE, dry_run=False):
+            return Editing(path, TomlLines(text), dry_run)
+
+        st = editing()
+        screens = [
+            ('main', screen_main(st), 'tweakkimi — Kimi configuration'),
+            ('tools', screen_tools(st, CATALOGUE), 'Disable builtin tools'),
+            ('skills', screen_bool(st, K_BUILTIN_SKILLS, 'Builtin product skills',
+                                   ['what the skills are']), 'Builtin product skills'),
+            ('permission', screen_permission(st), 'Permission mode'),
+            ('extra dirs', screen_extra_dirs(st), 'Extra skill directories'),
+            ('loop', screen_loop(st), 'Loop control'),
+        ]
+        for name, screen, marker in screens:
+            rows = screen.build(st)
+            ok(f'{name}: builds rows', len(rows) > 0)
+            ok(f'{name}: has a selectable row', any(r.selectable for r in rows))
+
+            # Navigation must never come to rest on a fact or a rule.
+            facts = {i for i, r in enumerate(rows) if not r.selectable}
+            pos = m.first_selectable(rows)
+            landed = set()
+            for _ in range(len(rows) * 2):
+                pos, _, _ = m.handle(screen, st, rows, pos, 'down')
+                landed.add(pos)
+            ok(f'{name}: navigation skips facts and rules',
+               not landed & facts, sorted(landed & facts))
+            ok(f'{name}: every selectable row is reachable',
+               landed == set(range(len(rows))) - facts,
+               sorted(set(range(len(rows))) - facts - landed))
+
+            # The way out closes the screen, and so does escape.
+            leave = next(i for i, r in enumerate(rows) if r.key in ('back', 'q'))
+            with quiet():
+                _, keep, _ = m.handle(screen, st, rows, leave, 'enter')
+            ok(f'{name}: the closing row closes the screen', keep is False)
+            ok(f'{name}: esc leaves',
+               m.handle(screen, st, rows, m.first_selectable(rows), 'esc')[1] is False)
+
+            # The mouse mapping is built by the same pass that draws, so it can
+            # be checked against the drawn lines rather than a second model.
+            row_map: dict[int, int] = {}
+            lines = m.render(screen, st, rows, m.first_selectable(rows), row_map)
+            ok(f'{name}: {marker!r} drawn', any(marker in l for l in lines))
+            ok(f'{name}: every selectable row is mapped',
+               len(row_map) == len([r for r in rows if r.selectable]), len(row_map))
+            astray = [lines[n] for n, ri in row_map.items()
+                      if rows[ri].label not in lines[n]]
+            ok(f'{name}: every mapped line holds its row', not astray, astray[:1])
+
+        # -- tools: toggling and saving ------------------------------------
+        st = editing()
+        tools = screen_tools(st, CATALOGUE)
+        rows = tools.build(st)
+        beta = next(i for i, r in enumerate(rows) if r.key == 'tool:Beta')
+        with quiet():
+            m.handle(tools, st, rows, beta, 'enter')
+        rows = tools.build(st)
+        ok('a toggled tool is ticked',
+           any(r.key == 'tool:Beta' and r.value(st).startswith('[x]') for r in rows))
+        ok('the summary follows the selection',
+           any(r.kind == 'info' and 'selected: 1, saving about 120' in r.label
+               for r in rows))
+        save = next(i for i, r in enumerate(rows) if r.key == 'save')
+        with quiet():
+            _, keep, _ = m.handle(tools, st, rows, save, 'enter')
+        ok('saving closes the tool screen', keep is False)
+        ok('saving writes exactly the toggled name',
+           tomllib.loads(st.doc.text())[S_TOOLS]['disabled'] == ['Beta'],
+           tomllib.loads(st.doc.text()).get(S_TOOLS))
+
+        # Back discards, where Save would have written.
+        st = editing()
+        tools = screen_tools(st, CATALOGUE)
+        rows = tools.build(st)
+        with quiet():
+            m.handle(tools, st, rows, beta, 'enter')
+            m.handle(tools, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'back'), 'enter')
+        ok('back writes nothing', S_TOOLS not in tomllib.loads(st.doc.text()))
+
+        # All and none reach every offered tool and nothing beyond it.
+        st = editing()
+        tools = screen_tools(st, CATALOGUE)
+        rows = tools.build(st)
+        with quiet():
+            m.handle(tools, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'all'), 'enter')
+            m.handle(tools, st, rows, save, 'enter')
+        ok('all disables the whole catalogue',
+           tomllib.loads(st.doc.text())[S_TOOLS]['disabled'] == ['Alpha', 'Beta', 'Gamma'])
+
+        # A name disabled in the file that this build no longer offers is
+        # reported and survives the save, rather than vanishing silently.
+        st = editing(SAMPLE + '\n[tools]\ndisabled = ["Ghost"]\n')
+        tools = screen_tools(st, CATALOGUE)
+        rows = tools.build(st)
+        ok('an unknown disabled name is reported',
+           any(r.kind == 'info' and 'Ghost' in r.label for r in rows))
+        with quiet():
+            m.handle(tools, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'save'), 'enter')
+        ok('an unknown disabled name survives a save',
+           tomllib.loads(st.doc.text())[S_TOOLS]['disabled'] == ['Ghost'])
+
+        # -- choice screens: current, recommended, set and unset -----------
+        st = editing(f'{K_PERMISSION} = "yolo"\n')
+        perm = screen_permission(st)
+        rows = perm.build(st)
+        ok('the current option is marked',
+           [r.label for r in rows
+            if r.key.startswith('set:') and 'current' in r.note(st)] == ['yolo'])
+        ok('the recommended option is marked',
+           [r.label for r in rows
+            if r.key.startswith('set:') and 'recommended' in r.note(st)] == ['yolo'])
+        unset = next(i for i, r in enumerate(rows) if r.key == 'unset')
+        with quiet():
+            _, keep, _ = m.handle(perm, st, rows, unset, 'enter')
+        ok('unset closes the screen', keep is False)
+        ok('unset removes the key again',
+           K_PERMISSION not in tomllib.loads(st.doc.text()))
+
+        st = editing()
+        perm = screen_permission(st)
+        rows = perm.build(st)
+        with quiet():
+            m.handle(perm, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'set:auto'), 'enter')
+        ok('picking an option writes it',
+           tomllib.loads(st.doc.text())[K_PERMISSION] == 'auto')
+
+        st = editing()
+        skills = screen_bool(st, K_BUILTIN_SKILLS, 'Builtin product skills', ['body'])
+        rows = skills.build(st)
+        with quiet():
+            m.handle(skills, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'set:off'), 'enter')
+        ok('a boolean is written as a boolean',
+           tomllib.loads(st.doc.text())[K_BUILTIN_SKILLS] is False)
+
+        # -- extra skill directories ---------------------------------------
+        st = editing()
+        dirs = screen_extra_dirs(st)
+        rows = dirs.build(st)
+        with answering('~/skills'), quiet():
+            m.handle(dirs, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'add'), 'enter')
+        rows = dirs.build(st)
+        ok('an added directory becomes a row',
+           any(r.key == 'drop:~/skills' for r in rows))
+        rel = editing('extra_skill_dirs = ["shared/skills"]\n')
+        ok('a relative path says so',
+           next(r for r in screen_extra_dirs(rel).build(rel)
+                if r.key.startswith('drop:')).value(rel)
+           == '(relative to the project root)')
+        with quiet():
+            m.handle(dirs, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'save'), 'enter')
+        ok('saving writes the array',
+           tomllib.loads(st.doc.text())[K_EXTRA_SKILL_DIRS] == ['~/skills'])
+
+        st = editing('extra_skill_dirs = ["~/skills"]\n')
+        dirs = screen_extra_dirs(st)
+        rows = dirs.build(st)
+        with quiet():
+            m.handle(dirs, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'drop:~/skills'),
+                     'enter')
+        rows = dirs.build(st)
+        ok('removing empties the list',
+           not any(r.key.startswith('drop:') for r in rows))
+        with quiet():
+            m.handle(dirs, st, rows,
+                     next(i for i, r in enumerate(rows) if r.key == 'save'), 'enter')
+        ok('an empty list removes the key',
+           K_EXTRA_SKILL_DIRS not in tomllib.loads(st.doc.text()))
+
+        # -- loop control: only a number is written ------------------------
+        st = editing()
+        lp = screen_loop(st)
+        rows = lp.build(st)
+        attempts = next(i for i, r in enumerate(rows) if r.key == f'num:{K_ATTEMPTS}')
+        before = st.doc.text()
+        with answering('not a number'), quiet():
+            m.handle(lp, st, rows, attempts, 'enter')
+        ok('a non-number writes nothing', st.doc.text() == before)
+        with answering(''), quiet():
+            m.handle(lp, st, rows, attempts, 'enter')
+        ok('an empty answer writes nothing', st.doc.text() == before)
+        with answering('7'), quiet():
+            m.handle(lp, st, rows, attempts, 'enter')
+        ok('a number is written',
+           tomllib.loads(st.doc.text())[S_LOOP][K_ATTEMPTS] == 7)
+
+        # A screen that announces what it just did grows a row, so both the
+        # row and its position have to be looked up again every time.
+        def press(screen, state, key, stroke):
+            rows = screen.build(state)
+            idx = next(i for i, r in enumerate(rows) if r.key == key)
+            return m.handle(screen, state, rows, idx, stroke)
+
+        def row_of(screen, state, key):
+            return next(r for r in screen.build(state) if r.key == key)
+
+        # `reload` is what the loop runs after an action; the row's value has
+        # to follow the edited lines, not the view they were parsed from.
+        ok('the row shows what the file now says',
+           row_of(lp, lp.reload(st), f'num:{K_ATTEMPTS}').value(st) == '7',
+           row_of(lp, st, f'num:{K_ATTEMPTS}').value(st))
+
+        # ‹› is the only way to say "no opinion" about a number, so it has to
+        # remove the key rather than write a default back into the file.
+        _, _, reloaded = press(lp, st, f'num:{K_ATTEMPTS}', 'left')
+        ok('‹› asks for a reload', reloaded)
+        ok('‹› hands the setting back to Kimi',
+           K_ATTEMPTS not in (tomllib.loads(st.doc.text()).get(S_LOOP) or {}),
+           tomllib.loads(st.doc.text()).get(S_LOOP))
+        ok('the reset is announced',
+           any(r.kind == 'info' and 'back to Kimi' in r.label
+               for r in lp.build(lp.reload(st))))
+        ok('the row falls back to the default it is given',
+           row_of(lp, lp.reload(st), f'num:{K_ATTEMPTS}').value(st)
+           == fmt_state(KIMI_DEFAULTS[K_ATTEMPTS], False))
+
+        # Back carries no `on_cycle`, so the arrows must not reach it.
+        before = st.doc.text()
+        _, keep, _ = press(lp, st, 'back', 'right')
+        ok('‹› on a plain row does nothing', keep and st.doc.text() == before)
+
+        # -- reasoning -----------------------------------------------------
+        st = editing()
+        th = screen_thinking(st)
+        rows = th.build(st)
+        ok('reasoning builds rows', len(rows) > 0)
+        dead = [i for i, r in enumerate(rows) if not r.selectable]
+        pos = m.first_selectable(rows)
+        for _ in range(len(rows) * 2):
+            pos, _, _ = m.handle(th, st, rows, pos, 'down')
+            ok('reasoning: never lands on an unselectable row', pos not in dead, pos)
+        ok('reasoning: back closes', press(th, st, 'back', 'enter')[1] is False)
+        ok('reasoning: esc closes', m.handle(th, st, rows, 0, 'esc')[1] is False)
+
+        # ‹› walks the levels and writes each one; the file spelling is what
+        # Kimi reads, so it is what is asserted.
+        press(th, st, f'eff:{K_THINK_EFFORT}', 'right')
+        first = tomllib.loads(st.doc.text())[S_THINKING][K_THINK_EFFORT]
+        ok('an effort level is written', first in EFFORTS, first)
+        press(th, st, f'eff:{K_THINK_EFFORT}', 'right')
+        second = tomllib.loads(st.doc.text())[S_THINKING][K_THINK_EFFORT]
+        ok('‹› advances to the next level',
+           EFFORTS.index(second) == (EFFORTS.index(first) + 1) % len(EFFORTS),
+           (first, second))
+
+        # Enter is the way back to Kimi's own choice, because a level you want
+        # is one arrow away and a level you no longer want has nowhere to go.
+        press(th, st, f'eff:{K_THINK_EFFORT}', 'enter')
+        ok('enter hands the level back to Kimi',
+           K_THINK_EFFORT not in (tomllib.loads(st.doc.text()).get(S_THINKING) or {}),
+           tomllib.loads(st.doc.text()).get(S_THINKING))
+
+        # forced_effort is a separate key, not the same one under another name.
+        press(th, st, f'eff:{K_THINK_FORCED}', 'right')
+        section = tomllib.loads(st.doc.text())[S_THINKING]
+        ok('forced_effort is its own key',
+           K_THINK_FORCED in section and K_THINK_EFFORT not in section, section)
+
+        # `keep` takes a word no list can hold, so it asks — and a refusal to
+        # answer must leave the file alone.
+        before = st.doc.text()
+        with answering(''), quiet():
+            press(th, st, f'txt:{K_THINK_KEEP}', 'enter')
+        ok('an empty answer writes nothing', st.doc.text() == before)
+        with answering('all'), quiet():
+            press(th, st, f'txt:{K_THINK_KEEP}', 'enter')
+        ok('keep is written',
+           tomllib.loads(st.doc.text())[S_THINKING][K_THINK_KEEP] == 'all')
+        press(th, st, f'txt:{K_THINK_KEEP}', 'left')
+        ok('‹› hands keep back to Kimi',
+           K_THINK_KEEP not in tomllib.loads(st.doc.text())[S_THINKING])
+
+        # -- tool sets -------------------------------------------------------
+        # The presets are tweakkimi's own file; the only thing that reaches
+        # config.toml is the list a set writes into `[tools] disabled`.
+        sets_path = Path(td) / 'toolsets.conf'
+        st = editing('[tools]\ndisabled = ["CronCreate", "CronList"]\n')
+        ts = screen_toolsets(st, sets_path)
+
+        ok('no sets to begin with', read_toolsets(sets_path) == {})
+        with answering('cron'), quiet():
+            press(ts, st, 'save', 'enter')
+        ok('the current list is saved under a name',
+           read_toolsets(sets_path) == {'cron': ['CronCreate', 'CronList']},
+           read_toolsets(sets_path))
+
+        # A name that would break the file's own format is refused rather than
+        # written and misread on the next start.
+        with answering('a,b'), quiet():
+            press(ts, st, 'save', 'enter')
+        ok('a comma in a name is refused', list(read_toolsets(sets_path)) == ['cron'])
+
+        # Applying a set replaces the list; it does not merge with it.
+        st = editing('[tools]\ndisabled = ["Goal"]\n')
+        ts = screen_toolsets(st, sets_path)
+        with quiet():
+            press(ts, st, 'use:cron', 'enter')
+        ok('applying a set replaces the disabled list',
+           tomllib.loads(st.doc.text())[S_TOOLS]['disabled'] == ['CronCreate', 'CronList'],
+           tomllib.loads(st.doc.text())[S_TOOLS])
+
+        # ‹› deletes the set and must leave config.toml alone.
+        before = st.doc.text()
+        press(ts, st, 'use:cron', 'right')
+        ok('‹› deletes the set', read_toolsets(sets_path) == {})
+        ok('deleting a set does not touch config.toml', st.doc.text() == before)
+
+        ok('tool sets: back closes', press(ts, st, 'back', 'enter')[1] is False)
+
+        # -- the top level -------------------------------------------------
+        st = editing()
+        keys = [r.key for r in screen_main(st).build(st) if r.selectable]
+        digits = [k for k in keys if k.isdigit()]
+        # Numbered without gaps, in order. Checked as a shape rather than as a
+        # fixed list, because the list is the thing that grows: a new screen
+        # should extend the sequence, not fail a test that hardcoded it.
+        ok('--item still reaches every entry',
+           digits == [str(n) for n in range(1, len(digits) + 1)], keys)
+        ok('every numbered entry opens a screen', len(digits) >= 7, digits)
+        with quiet():
+            ok('quit closes the menu', open_item(st, 'q') is False)
+
+        st = editing(dry_run=True)
+        st.doc.set('', K_PERMISSION, lit('yolo'))
+        with quiet():
+            ok('write closes the menu', open_item(st, 'w') is False)
+        ok('a dry run leaves the file alone', path.read_text() == SAMPLE)
+        ok('a dry run reports success', st.rc == 0)
 
     bad = [c for c in checks if not c[1]]
     for name, cond, detail in checks:

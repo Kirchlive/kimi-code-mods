@@ -41,28 +41,10 @@
 // which is exactly what happened before this block existed: the entry read
 // `off` while the command was being compiled in regardless.
 
-let enabled = false;
-const getModule = typeof process !== 'undefined' && process.getBuiltinModule;
-if (getModule) {
-  try {
-    const fs = process.getBuiltinModule('fs');
-    const path = process.getBuiltinModule('path');
-    const patchDir = process.argv[4];
-    if (patchDir) {
-      const conf = path.join(path.dirname(path.resolve(patchDir)), 'patch-settings.conf');
-      if (fs.existsSync(conf)) {
-        for (const line of fs.readFileSync(conf, 'utf8').split('\n')) {
-          const m = /^\s*wd_command\s*=\s*([^#\s]+)/.exec(line.replace(/#.*/, ''));
-          if (m) enabled = /^(on|true|1|yes)$/i.test(m[1].trim());
-        }
-      }
-    }
-  } catch {
-    // An unreadable settings file must not fail the run, and must not add a
-    // command the user never asked for.
-    enabled = false;
-  }
-}
+// The runner owns the reading; a patch only asks. An unreadable settings file
+// falls back there, to the default named here, which must not add a command
+// the user never asked for.
+const enabled = /^(on|true|1|yes)$/i.test(settings.get('wd_command', 'off'));
 
 if (!enabled) {
   throw new Error('already patched');

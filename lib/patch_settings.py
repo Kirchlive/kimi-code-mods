@@ -24,13 +24,45 @@ DEFAULTS = {
     'suggestion_height': 'default',   # default | half | full
     'wd_command': 'off',              # on | off
     'click_cursor': 'off',            # on | off
+    'agents_md_names': 'off',         # off | claude | all
+    'read_line_numbers': 'on',        # on | off
+    'expanded_by_default': 'off',     # off | thinking | tools | both
+    'read_limits': 'default',         # default | moderate | large
+    'auto_accept_plan': 'off',        # on | off
+    'effort_router': 'off',           # off | pin | free
+    'spinner_style': 'default',       # default | mirror | braille | dots | moon | blocks
+    'spinner_interval_ms': 'default',  # default, or 20..2000
+    'thinking_verbs': 'off',          # on | off
+    'user_message_marker': 'default',  # default, or the prefix itself
+    'user_message_border': 'off',     # off | round | single | double | bold | topbottom
+    'user_message_style': 'default',  # default | plain | italic | dim | underline
+    'input_box_border': 'default',    # default | off | single | double | bold
 }
 
 CHOICES = {
     'suggestion_height': ['default', 'half', 'full'],
     'wd_command': ['off', 'on'],
     'click_cursor': ['off', 'on'],
+    'agents_md_names': ['off', 'claude', 'all'],
+    'read_line_numbers': ['on', 'off'],
+    'expanded_by_default': ['off', 'thinking', 'tools', 'both'],
+    'read_limits': ['default', 'moderate', 'large'],
+    'auto_accept_plan': ['off', 'on'],
+    'effort_router': ['off', 'pin', 'free'],
+    'spinner_style': ['default', 'braille', 'dots', 'moon', 'blocks', 'mirror'],
+    'thinking_verbs': ['off', 'on'],
+    'user_message_border': ['off', 'round', 'single', 'double', 'bold', 'topbottom'],
+    'user_message_style': ['default', 'plain', 'italic', 'dim', 'underline'],
+    'input_box_border': ['default', 'off', 'single', 'double', 'bold'],
 }
+
+# Two settings take a value no list can hold: a duration in milliseconds and a
+# prefix string. They are registered in DEFAULTS above but deliberately absent
+# here, and the menu reads that absence as "ask for a value" rather than
+# "cycle" — which is why every key belongs in DEFAULTS and only some in
+# CHOICES. A key in neither is invisible to the menu, which is the one state
+# that would be a mistake.
+FREE_TEXT = sorted(set(DEFAULTS) - set(CHOICES))
 
 LINE_RE = re.compile(r'^\s*([A-Za-z_][\w.-]*)\s*=\s*(.*?)\s*$')
 
