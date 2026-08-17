@@ -30,7 +30,7 @@ beobachtet · `offen` noch nicht gebaut.
 
 16. Eingebaute Tools abschalten | built-in: [tools] disabled in config.toml | done
 17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | done
-18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_MAX_TURNS u. a.   | offen
+18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_*, Menü „Launcher environment" | ungetestet
 19. Shell-Hooks auf 20 Events   | built-in: [hooks] in config.toml          | ungeklaert
 20. Modell je Subagent          | built-in: [secondary_model], config-menu 9 | ungetestet
 
@@ -159,9 +159,12 @@ Herleitung steht in `FINDINGS.md`.
 für Subagenten dann tatsächlich verwendet wird, ist damit noch nicht gezeigt —
 dafür müsste ein Zweitmodell konfiguriert und ein Subagent beobachtet werden.
 
-**18** — Die fünf `KIMI_CODE_TUI_*`-Variablen entscheiden, wie viel Historie je
-Turn erneut gesendet wird. Das ist der einzige Hebel, der die **laufenden**
+**18** — Die sechs `KIMI_CODE_TUI_*`-Variablen entscheiden, wie viel Historie
+je Turn erneut gesendet wird. Das ist der einzige Hebel, der die **laufenden**
 Kosten senkt statt der Startkosten — deshalb trotz `built-in` ein Menüeintrag.
+Alle sechs stehen jetzt als Zeilen im Bildschirm „Launcher environment": enter
+setzt einen Wert, ‹› gibt ihn an Kimi zurück. Was fehlt, ist die Messung, wie
+viel ein niedrigerer Wert tatsächlich spart.
 
 **22** — Der aktive System-Prompt hat 52.386 Zeichen. Ihn zu kürzen ist echtes
 Redigieren mit Verhaltensfolgen und braucht kuratierte Presets, keinen Schalter.
