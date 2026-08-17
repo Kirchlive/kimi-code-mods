@@ -117,10 +117,50 @@ There are **two implementations**: the v2 one above, and an older one in
 `agent-core/src/session/hooks/` with only 16 events. Since v2 is the live
 generation, the 20-event list applies.
 
-#### Why nothing fired — how far the trail goes
+#### They do fire — the earlier verdict was wrong
 
-Hooks were configured, accepted by `kimi doctor`, and never observed running.
-Four things are now ruled out, so nobody has to rule them out again:
+`SessionStart` works. The proof was sitting on disk the whole time, written by
+the very test that was recorded as having produced nothing:
+
+```
+$ cat evidence/hook-proof-20260814.txt
+session-start 05:28:51
+session-start 05:37:21
+session-start 10:38:02
+session-start 10:47:59
+session-start 10:48:29
+session-start 17:28:18
+```
+
+Two hooks were configured against that file, `SessionStart` and `PreToolUse`,
+with the same shell command shape. Six `session-start` lines, and **not one**
+`pre-tool-use` line. So the hook system is not inert; one event class was not
+observed. That is a different, much smaller question than the one this section
+used to ask, and it needs one tool call in a live session to settle: start
+Kimi, let it read a file, look at the file again.
+
+#### What the wiring says about the remaining half
+
+`PreToolUse` is not left unconnected. `registerListeners()` resolves the tool
+executor itself and hands it over:
+
+```js
+registerListeners() {
+  this.registerPermissionHooks();
+  this.registerToolHooks(this.instantiation.invokeFunction((a) => a.get(IAgentToolExecutorService)));
+  this.registerPromptHooks(this.instantiation.invokeFunction((a) => a.get(IAgentPromptService)));
+  …
+}
+```
+
+Note the shape difference that makes the two halves fail differently.
+`registerPermissionHooks` subscribes to the event bus and needs nothing else,
+which is the kind of wiring that either works everywhere or nowhere.
+`registerToolHooks` needs a service resolved out of the **agent** scope, while
+the `SessionStart` side lives in the **session** scope — two scopes, two
+lifetimes, and only one of them is proven to reach a running session.
+
+Four things are ruled out, so nobody has to rule them out again:
 
 **The section name is right.** `HOOKS_SECTION = "hooks"` in
 `agent-core-v2/src/agent/externalHooks/configSection.ts`, and
