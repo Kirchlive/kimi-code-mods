@@ -31,7 +31,7 @@ beobachtet · `offen` noch nicht gebaut.
 16. Eingebaute Tools abschalten | built-in: [tools] disabled in config.toml | done
 17. Vollbild-Renderer           | built-in: KIMI_CODE_TUI_FULL_SCREEN=1     | done
 18. Transkript-Fenster kürzen   | built-in: KIMI_CODE_TUI_*, Menü „Launcher environment" | ungetestet
-19. Shell-Hooks auf 20 Events   | built-in: [[hooks]] in config.toml        | teilweise
+19. Shell-Hooks auf 20 Events   | built-in: [[hooks]], config-menu Punkt 10 | teilweise
 20. Modell je Subagent          | built-in: [secondary_model], config-menu 9 | ungetestet
 
 21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
@@ -65,6 +65,7 @@ beobachtet · `offen` noch nicht gebaut.
 48. Reasoning per config.toml   | built-in: [thinking], config-menu Punkt 7 | ungetestet
 49. Werkzeug-Presets            | toolsets.conf, config-menu Punkt 8        | ungetestet
 50. Subagenten-Modellpool       | built-in: [secondary_model], config-menu 9 | ungetestet
+51. Hook-Editor                 | config-menu Punkt 10, [[hooks]]-Bloecke    | ungetestet
 ```
 
 Zeile 36 läuft im installierten Binary: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md",

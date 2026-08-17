@@ -312,6 +312,11 @@ def build_items(st: State) -> list[Item]:
                  data.get(cfg.S_SECONDARY) or {}),
              key='subagent',
              help='Which model a subagent runs on. Needs the secondary-model flag.'),
+        Item('submenu', 'Event hooks',
+             lambda s: (lambda h: f'{len(h)} configured' if h else 'none')(
+                 data.get(cfg.S_HOOKS) if isinstance(data.get(cfg.S_HOOKS), list) else []),
+             key='hooks',
+             help='Run a shell command on one of Kimi\'s 20 events.'),
         Item('submenu', 'Tool sets',
              lambda s: (lambda n: f'{n} saved' if n else 'none saved')(
                  len(cfg.read_toolsets())),
@@ -708,6 +713,8 @@ def activate(st: State, item: Item) -> bool:
         config_item(st, '8')
     elif k == 'subagent':
         config_item(st, '9')
+    elif k == 'hooks':
+        config_item(st, '10')
     elif k == 'themes':
         state = themes.ThemeState()
         sub(themes.screen_themes(state), state)

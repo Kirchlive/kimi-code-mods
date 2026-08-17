@@ -63,6 +63,17 @@ S_LOOP = 'loop_control'
 K_ATTEMPTS = 'max_attempts_per_step'
 K_ATTEMPTS_OLD = 'max_retries_per_step'      # deprecated, renamed on sight
 K_RESERVED = 'reserved_context_size'
+S_HOOKS = 'hooks'
+# From HOOK_EVENT_TYPES in agent-core-v2/src/agent/externalHooks/types.ts,
+# in the bundle's own order. The schema is strict, so a name that is not on
+# this list is rejected outright rather than ignored.
+HOOK_EVENTS = [
+    'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest',
+    'PermissionResult', 'UserPromptSubmit', 'UserPromptQueued', 'TurnStarted',
+    'Stop', 'StopFailure', 'Interrupt', 'SessionStart', 'SessionEnd',
+    'SessionHeartbeat', 'SubagentStart', 'SubagentStop', 'TaskStarted',
+    'PreCompact', 'PostCompact', 'Notification',
+]
 S_SECONDARY = 'secondary_model'
 K_SM_DEFAULT = 'default_model'
 K_SM_MODELS = 'models'
@@ -293,6 +304,46 @@ class TomlLines:
         span = self.find_key(section, key)
         if span:
             del self.lines[span[0]:span[1]]
+
+    def table_blocks(self, section: str) -> list[tuple[int, int]]:
+        """Line spans of each `[[section]]` block, in file order.
+
+        Every other method here addresses a key inside *the* section, which is
+        the right model until a section repeats. `[[hooks]]` is an array of
+        tables: the same header appears once per hook, and `find_key` would
+        only ever see the first. So blocks are addressed by position, and a
+        block owns everything from its header down to the next header — the
+        blank line after it included, because that blank belongs to the block
+        rather than to whatever follows.
+        """
+        headers = [idx for idx, sec, _, is_header in self._map()
+                   if is_header and sec == section]
+        if not headers:
+            return []
+        all_headers = sorted(idx for idx, _, _, is_header in self._map() if is_header)
+        spans = []
+        for start in headers:
+            later = [h for h in all_headers if h > start]
+            end = later[0] if later else len(self.lines)
+            spans.append((start, end))
+        return spans
+
+    def append_table(self, section: str, pairs: list[tuple[str, str]]) -> None:
+        """Add one `[[section]]` block at the end of the file."""
+        if self.lines and self.lines[-1].strip():
+            self.lines.append('')
+        self.lines.append(f'[[{section}]]')
+        for key, literal in pairs:
+            self.lines.append(f'{key} = {literal}')
+
+    def remove_table(self, section: str, index: int) -> bool:
+        """Delete the `index`-th `[[section]]` block. False if there is none."""
+        spans = self.table_blocks(section)
+        if not 0 <= index < len(spans):
+            return False
+        start, end = spans[index]
+        del self.lines[start:end]
+        return True
 
     def rename(self, section: str, old: str, new: str) -> bool:
         """Rename a key, keeping its value and any trailing comment."""
@@ -747,6 +798,127 @@ def screen_loop(st: Editing) -> m.Screen:
                     title='Loop control')
 
 
+def screen_hooks(st: Editing) -> m.Screen:
+    """Shell commands on Kimi's own events.
+
+    This was written off as dead: `FEATURES.md` recorded the hooks as
+    implemented but ineffective, "the test command wrote not a single line".
+    The file that test wrote to was still on disk, with six `session-start`
+    lines in it — see `evidence/`. `SessionStart` works. What was not observed
+    is `PreToolUse`, which was configured against the same file in the same
+    run, so the honest position is that one event class is unproven rather
+    than that the system is dead.
+
+    That matters for what this screen promises. Adding a hook here writes
+    valid configuration for a system that demonstrably runs; whether *your*
+    event fires is a question the screen cannot answer, so it says which ones
+    have been seen working rather than implying all twenty are equal.
+
+    `[[hooks]]` is an array of tables, which is why this uses the block
+    operations rather than `set`: the same header repeats once per hook, and a
+    key lookup would only ever find the first.
+    """
+    message = ''
+
+    def hooks_of(s: Editing) -> list[dict]:
+        value = s.data.get(S_HOOKS)
+        return [h for h in value if isinstance(h, dict)] if isinstance(value, list) else []
+
+    def drop(s: Editing, item: Item, forward: bool) -> None:
+        nonlocal message
+        idx = int(item.key.split(':', 1)[1])
+        message = ('deleted' if s.doc.remove_table(S_HOOKS, idx)
+                   else 'nothing to delete there')
+
+    def build(s: Editing) -> list[Item]:
+        hooks = hooks_of(s)
+        rows = [Item('info', 'A shell command run on one of Kimi\'s events. '
+                             'Exit code decides the outcome;'),
+                Item('info', 'a crash or a timeout counts as "allow", so a hook '
+                             'cannot wedge the agent.'),
+                Item('info', 'Seen working: SessionStart. Not yet observed: '
+                             'PreToolUse — see evidence/.')]
+        if message:
+            rows.append(Item('info', message))
+        rows.append(Item('sep'))
+        for i, hook in enumerate(hooks):
+            event = str(hook.get('event', '?'))
+            command = str(hook.get('command', ''))
+            rows.append(Item('action', event,
+                             (lambda c: lambda x: (c[:44] + '…') if len(c) > 45 else c)(command),
+                             key=f'hook:{i}', on_cycle=drop,
+                             help='enter replaces the command, ‹› deletes the hook'))
+        if not hooks:
+            rows.append(Item('info', 'none configured'))
+        rows += [Item('sep'),
+                 Item('action', 'Add a hook', lambda x: '', key='add',
+                      help='Pick an event, then the command to run.'),
+                 Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def act(s: Editing, item: Item) -> bool:
+        nonlocal message
+        message = ''
+        if item.key == 'back':
+            return False
+
+        if item.key == 'add':
+            print()
+            for i, name in enumerate(HOOK_EVENTS, 1):
+                print(f'   {i:>2}  {name}')
+            raw = ask('   event (number or name): ').strip()
+            event = ''
+            if raw.isdigit() and 1 <= int(raw) <= len(HOOK_EVENTS):
+                event = HOOK_EVENTS[int(raw) - 1]
+            elif raw in HOOK_EVENTS:
+                event = raw
+            if not event:
+                message = f'not added — "{raw}" is not one of the {len(HOOK_EVENTS)} events'
+                return True
+            command = ask('   command: ').strip()
+            if not command:
+                message = 'not added — a hook without a command does nothing'
+                return True
+            pairs = [('event', lit(event)), ('command', lit(command))]
+            matcher = ask('   matcher (optional, enter to skip): ').strip()
+            if matcher:
+                pairs.append(('matcher', lit(matcher)))
+            timeout = ask('   timeout in seconds (1-600, enter for Kimi\'s own): ').strip()
+            if timeout:
+                if not timeout.isdigit() or not 1 <= int(timeout) <= 600:
+                    message = f'not added — timeout must be 1 to 600, got "{timeout}"'
+                    return True
+                pairs.append(('timeout', lit(int(timeout))))
+            s.doc.append_table(S_HOOKS, pairs)
+            message = f'added a {event} hook'
+            return True
+
+        if item.key.startswith('hook:'):
+            idx = int(item.key[5:])
+            hooks = hooks_of(s)
+            if not 0 <= idx < len(hooks):
+                return True
+            current = str(hooks[idx].get('command', ''))
+            raw = ask(f'   command [{current}] (enter keeps it): ').strip()
+            if not raw:
+                return True
+            # The block is rewritten rather than edited in place: `set` cannot
+            # address the second table of a repeated section, and inventing a
+            # positional variant of it for one screen would be the wrong place
+            # to put that knowledge.
+            hook = dict(hooks[idx])
+            hook['command'] = raw
+            order = ['event', 'command', 'matcher', 'timeout']
+            pairs = [(k, lit(hook[k])) for k in order if k in hook]
+            s.doc.remove_table(S_HOOKS, idx)
+            s.doc.append_table(S_HOOKS, pairs)
+            message = 'command replaced — the hook moves to the end of the file'
+        return True
+
+    return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
+                    title='Event hooks')
+
+
 def subagent_rules(section: dict, subagent_flag_on: bool) -> list[str]:
     """Everything Kimi would refuse about a `[secondary_model]` section.
 
@@ -1191,6 +1363,11 @@ def screen_main(st: Editing) -> m.Screen:
                      x.data.get(S_SECONDARY) or {}),
                  key='9',
                  help='Which model a subagent runs on. Needs the secondary-model flag.'),
+            Item('submenu', 'Event hooks',
+                 lambda x: (lambda h: f'{len(h)} configured' if h else 'none')(
+                     x.data.get(S_HOOKS) if isinstance(x.data.get(S_HOOKS), list) else []),
+                 key='10',
+                 help='Run a shell command on one of Kimi\'s 20 events.'),
             # Environment-only settings (fullscreen, transcript window) live in
             # the launcher profile; they cannot live in config.toml.
             Item('sep'),
@@ -1252,6 +1429,8 @@ def open_item(st: Editing, item) -> bool:
         sub(screen_toolsets(st), st)
     elif key == '9':
         sub(screen_subagent(st), st)
+    elif key == '10':
+        sub(screen_hooks(st), st)
     st.refresh()
     return True
 
@@ -1747,6 +1926,97 @@ def _selfcheck():
         ok('deleting a set does not touch config.toml', st.doc.text() == before)
 
         ok('tool sets: back closes', press(ts, st, 'back', 'enter')[1] is False)
+
+        # -- arrays of tables ------------------------------------------------
+        # `[[hooks]]` is the first repeated section this editor has had to
+        # handle, and a line editor is exactly where that goes wrong quietly:
+        # a key lookup finds the first block and edits it while the user is
+        # looking at the second.
+        TWO = ('# keep me\n[tools]\ndisabled = ["Cron"]\n\n'
+               '[[hooks]]\nevent = "SessionStart"\ncommand = "a"\n\n'
+               '[[hooks]]\nevent = "PreToolUse"\ncommand = "b"\n\n'
+               '[loop_control]\nmax_attempts_per_step = 3\n')
+        doc = TomlLines(TWO)
+        ok('both hook blocks are found', len(doc.table_blocks(S_HOOKS)) == 2,
+           doc.table_blocks(S_HOOKS))
+        ok('a section that repeats once is one block',
+           len(TomlLines('[[hooks]]\nevent = "Stop"\n').table_blocks(S_HOOKS)) == 1)
+        ok('a section that is absent has no blocks',
+           TomlLines('[tools]\n').table_blocks(S_HOOKS) == [])
+
+        doc = TomlLines(TWO)
+        ok('the second block is removable', doc.remove_table(S_HOOKS, 1))
+        data = tomllib.loads(doc.text())
+        ok('the first hook survives', [h['event'] for h in data[S_HOOKS]] == ['SessionStart'],
+           data.get(S_HOOKS))
+        ok('the neighbouring sections survive',
+           data['tools']['disabled'] == ['Cron']
+           and data['loop_control']['max_attempts_per_step'] == 3, data)
+        ok('a comment outside the blocks survives', '# keep me' in doc.text())
+        ok('removing past the end is refused', doc.remove_table(S_HOOKS, 9) is False)
+
+        doc = TomlLines(TWO)
+        doc.append_table(S_HOOKS, [('event', lit('Stop')), ('command', lit('c')),
+                                   ('timeout', lit(30))])
+        data = tomllib.loads(doc.text())
+        ok('an appended block parses back',
+           [h['event'] for h in data[S_HOOKS]] == ['SessionStart', 'PreToolUse', 'Stop'],
+           [h.get('event') for h in data.get(S_HOOKS, [])])
+        ok('its values come back as written',
+           data[S_HOOKS][2] == {'event': 'Stop', 'command': 'c', 'timeout': 30},
+           data[S_HOOKS][2])
+        ok('appending to a file with no such section works',
+           tomllib.loads((lambda d: (d.append_table(S_HOOKS, [('event', lit('Stop')),
+                                                              ('command', lit('x'))]),
+                                     d.text())[1])(TomlLines('[tools]\n')))[S_HOOKS][0]['event']
+           == 'Stop')
+
+        # -- the hooks screen ------------------------------------------------
+        st = editing(TWO)
+        hk = screen_hooks(st)
+        rows = hk.build(st)
+        ok('hooks: a row per configured hook',
+           len([r for r in rows if r.key.startswith('hook:')]) == 2)
+        dead = [i for i, r in enumerate(rows) if not r.selectable]
+        pos = m.first_selectable(rows)
+        for _ in range(len(rows) * 2):
+            pos, _, _ = m.handle(hk, st, rows, pos, 'down')
+            ok('hooks: never lands on an unselectable row', pos not in dead, pos)
+        ok('hooks: back closes', press(hk, st, 'back', 'enter')[1] is False)
+
+        # ‹› deletes the hook it is on, not the first one.
+        press(hk, st, 'hook:1', 'right')
+        ok('‹› deletes the hook under the cursor',
+           [h['event'] for h in tomllib.loads(st.doc.text())[S_HOOKS]] == ['SessionStart'],
+           tomllib.loads(st.doc.text()).get(S_HOOKS))
+
+        # Adding: the event has to be one Kimi knows, and the command cannot
+        # be empty — both are refused where the user can still see why.
+        st = editing('[tools]\n')
+        hk = screen_hooks(st)
+        with answering('SessionStart', 'echo hi', '', ''), quiet():
+            press(hk, st, 'add', 'enter')
+        added = tomllib.loads(st.doc.text()).get(S_HOOKS) or []
+        ok('a hook is added by name',
+           added and added[0] == {'event': 'SessionStart', 'command': 'echo hi'}, added)
+
+        before = st.doc.text()
+        with answering('NotAnEvent', 'echo hi', '', ''), quiet():
+            press(hk, st, 'add', 'enter')
+        ok('an unknown event is refused', st.doc.text() == before)
+        with answering('Stop', '', '', ''), quiet():
+            press(hk, st, 'add', 'enter')
+        ok('an empty command is refused', st.doc.text() == before)
+        with answering('Stop', 'echo x', '', '9999'), quiet():
+            press(hk, st, 'add', 'enter')
+        ok('an out-of-range timeout is refused', st.doc.text() == before)
+
+        # The event may also be picked by its number in the printed list.
+        with answering('12', 'echo numbered', '', ''), quiet():
+            press(hk, st, 'add', 'enter')
+        events = [h['event'] for h in (tomllib.loads(st.doc.text()).get(S_HOOKS) or [])]
+        ok('an event can be picked by number',
+           events[-1] == HOOK_EVENTS[11], (events, HOOK_EVENTS[11]))
 
         # -- subagent model --------------------------------------------------
         # The four rules are Kimi's own, and getting one wrong does not make a
