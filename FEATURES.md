@@ -50,7 +50,7 @@ beobachtet · `offen` noch nicht gebaut.
 33. Pfeilnavigation überall     | lib/menu.py, jeder Bildschirm ein Screen  | done
 34. Einstellungskanal für Patches| lib/run-patches.mjs reicht `settings` durch | done
 35. Patch-Testsuite             | lib/test_patches.mjs, auch gegen das Bundle | done
-36. Projektdateien: CLAUDE.md &c| patches/50-agents-md-names.js             | ungetestet
+36. Projektdateien: CLAUDE.md &c| patches/50-agents-md-names.js             | done
 37. Zeilennummern beim Read     | patches/55-read-line-numbers.js           | ungetestet
 38. Ausgeklappt statt gefaltet  | patches/74-expanded-by-default.js         | ungetestet
 39. Plan ohne Rückfrage         | patches/77-auto-accept-plan.js            | ungetestet
@@ -66,7 +66,11 @@ beobachtet · `offen` noch nicht gebaut.
 49. Werkzeug-Presets            | toolsets.conf, config-menu Punkt 8        | ungetestet
 ```
 
-`ungetestet` heißt hier genau eine Sache: der Patch findet seine Anker im
+Zeile 36 ist eingeschaltet, angewandt und im installierten Binary
+nachgewiesen: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md", "agents.md", "CLAUDE.md",
+"claude.md"]`, ad-hoc signiert, startet und meldet 0.36.0.
+
+`ungetestet` heißt bei den übrigen genau eine Sache: der Patch findet seine Anker im
 echten Bundle, verändert es, weigert sich beim zweiten Anwenden und das Ganze
 ergibt zusammen noch gültiges JavaScript — das prüft `lib/test_patches.mjs`
 gegen `.work/bundle.js`. Was noch aussteht, ist die Beobachtung in einer
