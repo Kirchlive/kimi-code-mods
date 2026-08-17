@@ -150,6 +150,17 @@ doing nothing.
 Without a terminal, every screen prints once and returns instead of spinning
 on EOF. That is what keeps `| less`, `--dry-run` and the test suite honest.
 
+**One place where `kimi doctor` is not the authority.** Everywhere else the
+config menu writes a file and lets Kimi's own validator decide whether it is
+acceptable — that is the rule, and it is the right one. `[secondary_model]` is
+the exception. Its cross-field rules (a pool may not be keyed `primary`,
+`force` may not be combined with a pool, `default_model` must name a pool
+entry) live in `assertValidSubagentModelConfig`, which hangs off creating a
+session rather than off validating a file. Doctor reports "All checked config
+files are valid" for every one of those, with the secondary-model flag off and
+on alike — both were tried. So the subagent screen checks them itself, before
+writing, and says which rule would have been broken.
+
 **Colours.** `Themes` writes `~/.kimi-code/themes/<name>.json`, which Kimi
 already loads — no patch involved. The editor exists because the loader fails
 silently three ways: a colour that is not six-digit hex is dropped without a
