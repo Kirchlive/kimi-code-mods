@@ -753,16 +753,25 @@ def subagent_rules(section: dict, subagent_flag_on: bool) -> list[str]:
     These are its own rules, restated where they can still be acted on. Kimi
     enforces them in `assertValidSubagentModelConfig`, which throws
     `CONFIG_INVALID` — so a wrong section is not a setting that quietly does
-    nothing, it is a Kimi that will not start.
+    nothing.
+
+    WHEN IT FIRES, EXACTLY
+    Two call sites, both in the live engine: the constructor of
+    `SessionSubagentModelsValidationService`, and
+    `sessionLifecycleService.assertSubagentModelPoolPreFlight`, which awaits
+    config, models and providers and then asserts. Both hang off creating a
+    session — not off starting the binary. `kimi --version` does not read the
+    file at all, which is worth knowing before concluding from a clean version
+    check that the section is fine.
 
     WHY THIS IS NOT LEFT TO `kimi doctor`
     Everywhere else in this menu Kimi's own validator is the authority, and
-    here it is not enough. `doctor config` accepts a pool keyed `primary`, and
-    accepts `force` combined with a pool — both were tried. The reason is in
-    the first line of the check: `if (!flags.enabled("secondary-model")) return;`.
-    The rules only run once the experiment is on, and doctor runs without it.
-    So the file passes validation, and Kimi then refuses to start the moment
-    the flag is switched on — with the config it just told you was fine.
+    here it is not enough. `doctor config` accepts a pool keyed `primary` and
+    accepts `force` combined with a pool — both were tried, with the
+    secondary-model flag off *and* on, and doctor reported "All checked config
+    files are valid" every time. The check simply is not on doctor's path. So
+    the file passes validation and the session then refuses to come up, with
+    the config doctor just called fine.
     """
     problems = []
     models = section.get(K_SM_MODELS) or {}
@@ -1774,6 +1783,16 @@ def _selfcheck():
                              'default_model = "a"\nmodels = { a = "x" }\n')
             accepted, _ = validate(probe)
             ok('kimi doctor does not catch force-plus-pool', accepted)
+            # …and not because the flag was off, which was the first guess.
+            import os as _os
+            env = dict(_os.environ, KIMI_CODE_EXPERIMENTAL_SECONDARY_MODEL='1')
+            if KIMI_BIN.exists():
+                r = subprocess.run([str(KIMI_BIN), 'doctor', 'config', str(probe)],
+                                   capture_output=True, text=True, timeout=120, env=env)
+                out = ((r.stdout or '') + (r.stderr or ''))
+                ok('nor does it with the flag on',
+                   not any(l.lstrip().startswith('ERROR') for l in out.splitlines()),
+                   out[:200])
         ok('but this menu does',
            subagent_rules({K_SM_FORCE: True, K_SM_DEFAULT: 'a',
                            K_SM_MODELS: {'a': 'x'}}, True) != [])
