@@ -85,8 +85,32 @@ jetzt selbst an, wie Kimis eigenes `"✨ "` es hat.
 
 ## Bewusst nicht gebaut
 
-Drei Punkte aus der tweakcc-Liste sind geprüft und verworfen, statt halb
+Vier Punkte aus der tweakcc-Liste sind geprüft und verworfen, statt halb
 umgesetzt zu werden.
+
+**Inline-`<system-reminder>` als Override.** Die datei-basierten Reminder
+(`goal-*`, `permission-mode-*`, `compaction-*`, `SIDE_QUESTION_SYSTEM_REMINDER`)
+liegen längst als `.md` unter `system-prompts/` und lassen sich bearbeiten;
+ein leerer Rumpf unterdrückt sie, weil der Applier den leeren String schreibt.
+Nicht erfasst sind zwei Blöcke, die inline in Template-Literalen stehen und
+deshalb an `extract-prompts.py` vorbeilaufen — es nimmt nur benannte Literale
+ab hundert Zeichen:
+
+```
+<system-reminder>\nThe same tool call has been repeated several times in a row. …
+<system-reminder>\nWrite your final response now, without any further tool calls. …
+```
+
+Sie editierbar zu machen hieße, dem Extractor und dem Applier eine dritte
+Anker-Klasse beizubringen (Literal statt Quellpfad oder Konstantenname), samt
+Drift-Erkennung dafür. Das ist gebaut in etwa so groß wie der Theme-Editor —
+für zwei Blöcke, die beide etwas Nützliches tun: der eine bremst
+Werkzeug-Schleifen, der andere erzwingt eine Antwort statt eines weiteren
+Aufrufs. Kimi hat insgesamt siebzehn `system-reminder`-Treffer gegen tweakccs
+vierunddreißig kuratierte Einträge; hier ist schlicht weniger zu holen. Wenn es
+doch gebraucht wird, ist die Verankerung am Renderer die richtige Bauart —
+tweakcc macht das so, und `isSuppressed` ist dort nichts weiter als
+`body.trim().length === 0`.
 
 **Per-Skill-Schalter.** Kimis einziger Hebel dafür ist der Frontmatter-Schlüssel
 `disable-model-invocation` in der Skill-Datei selbst. Ein Menü, das den setzt,
