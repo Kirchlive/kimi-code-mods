@@ -299,6 +299,16 @@ def build_items(st: State) -> list[Item]:
                         f"{loop.get(cfg.K_RESERVED, 50000)} reserved"),
              key='loop',
              help='Attempts per step, and context held back for the answer.'),
+        Item('submenu', 'Reasoning',
+             lambda s: (lambda t: ', '.join(f'{k}={v}' for k, v in t.items())
+                        if t else 'Kimi\'s own')(data.get(cfg.S_THINKING) or {}),
+             key='thinking',
+             help='How hard the model thinks, and whether thinking is re-sent.'),
+        Item('submenu', 'Tool sets',
+             lambda s: (lambda n: f'{n} saved' if n else 'none saved')(
+                 len(cfg.read_toolsets())),
+             key='toolsets',
+             help='Named lists of disabled tools, applied in one keystroke.'),
 
         Item('sep'),
 
@@ -684,6 +694,10 @@ def activate(st: State, item: Item) -> bool:
         config_item(st, '5')
     elif k == 'loop':
         config_item(st, '6')
+    elif k == 'thinking':
+        config_item(st, '7')
+    elif k == 'toolsets':
+        config_item(st, '8')
     elif k == 'themes':
         state = themes.ThemeState()
         sub(themes.screen_themes(state), state)
