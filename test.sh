@@ -125,6 +125,11 @@ python3 "$HERE/lib/keyreader.py" >/dev/null 2>&1
 check $? 'keyreader selfcheck (arrow-key decoding)'
 python3 "$HERE/lib/menu.py" >/dev/null 2>&1
 check $? 'menu selfcheck (screens, navigation, mouse mapping)'
+# The only test that types into a real terminal. Everything else scripts the
+# keyboard with FakeKeys, which never touches select — the exact path that hid
+# arrow keys reading as Escape.
+python3 "$HERE/lib/test_menu_pty.py" >/dev/null 2>&1
+check $? 'arrow keys through a real pseudo-terminal'
 python3 "$HERE/lib/patch_settings.py" >/dev/null 2>&1
 check $? 'patch_settings selfcheck'
 python3 "$HERE/lib/theme-menu.py" --selfcheck >/dev/null 2>&1

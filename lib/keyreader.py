@@ -130,7 +130,12 @@ def raw_mode(stream=None, mouse: bool = False):
     # the pipe instead.
     tracking = bool(mouse) and sys.stdout.isatty()
     try:
-        tty.setcbreak(fd)
+        # TCSANOW, not the TCSAFLUSH that `tty.setcbreak` uses by default.
+        # Flushing discards whatever is already in the input queue, and this
+        # mode is entered once per keystroke — so anything typed while the
+        # previous key was being handled is thrown away. Two arrows pressed
+        # quickly become one, which is exactly how a menu is used.
+        tty.setcbreak(fd, termios.TCSANOW)
         if tracking:
             sys.stdout.write(MOUSE_ON)
             sys.stdout.flush()
@@ -143,6 +148,78 @@ def raw_mode(stream=None, mouse: bool = False):
             except Exception:               # pragma: no cover - closed stdout
                 pass
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+class _FdStream:
+    """Reads straight from a descriptor, with nothing buffered in between.
+
+    This exists because of one bug, and it is worth stating plainly since the
+    symptom pointed nowhere near the cause: every arrow key closed the menu.
+
+    A terminal sends `ESC [ A` in a single write. `sys.stdin` is a buffered
+    `TextIOWrapper`, so `read(1)` pulls all three bytes into Python's buffer
+    and hands back the `ESC`. The escape decoder then asks whether more is on
+    the way — by calling `select` on the **file descriptor**, which is empty,
+    because the rest is sitting in Python's buffer where `select` cannot see
+    it. So a bare Escape is reported, and `esc` means "leave this screen".
+
+    Reading through `os.read` puts the bytes back where `select` is looking.
+    The two have to agree about where the data is; buffering on one side and
+    polling on the other is the whole defect.
+
+    UTF-8 is decoded here rather than by a text wrapper, because a wrapper is
+    exactly what must not sit in front of this.
+    """
+
+    __slots__ = ('fd',)
+
+    def __init__(self, fd: int):
+        self.fd = fd
+
+    def fileno(self) -> int:
+        return self.fd
+
+    def read(self, _n: int = 1) -> str:
+        try:
+            first = os.read(self.fd, 1)
+        except OSError:
+            return ''
+        if not first:
+            return ''
+        byte = first[0]
+        if byte < 0x80:
+            return chr(byte)
+        # A leading byte says how many continuation bytes follow. Reading them
+        # now keeps a typed umlaut from arriving as two unusable halves.
+        length = 2 if byte >> 5 == 0b110 else 3 if byte >> 4 == 0b1110 else \
+            4 if byte >> 3 == 0b11110 else 1
+        buf = bytearray(first)
+        for _ in range(length - 1):
+            try:
+                more = os.read(self.fd, 1)
+            except OSError:
+                break
+            if not more:
+                break
+            buf += more
+        return buf.decode('utf-8', 'replace')
+
+
+def _unbuffered(stream):
+    """The same stream, read without a buffer in front of it.
+
+    A test source answers `has_pending` for itself and is handed back
+    untouched; anything with a real descriptor is wrapped. Wrapping is what
+    makes `select` the authority on whether more bytes are coming.
+    """
+    if stream is None:
+        stream = sys.stdin
+    if isinstance(stream, _FdStream) or getattr(stream, 'has_pending', None) is not None:
+        return stream
+    try:
+        return _FdStream(stream.fileno())
+    except (AttributeError, ValueError, OSError):
+        return stream
 
 
 def _waiting(stream, timeout=ESC_TIMEOUT) -> bool:
@@ -200,7 +277,7 @@ def read_key(stream=None):
     two halves of one click from arriving as two events, and a release on a
     different row than the press is dropped as a drag rather than acted on.
     """
-    stream = stream or sys.stdin
+    stream = _unbuffered(stream)
     press_row = None
     while True:
         ch = stream.read(1)
@@ -355,6 +432,51 @@ def _selfcheck() -> int:
     src = FakeKeys(['down', sgr(0, 1, 3), 'enter'])
     got = [read_key(src) for _ in range(3)]
     assert got[0] == 'down' and isinstance(got[1], Mouse) and got[2] == 'enter', got
+
+    # -- over a real descriptor, which is the only way this bug shows ------
+    #
+    # `FakeKeys` answers `has_pending` for itself, so every case above skips
+    # `select` entirely. That is exactly the path a terminal does *not* take,
+    # and it hid a defect that made every arrow key close the menu: a terminal
+    # writes `ESC [ A` at once, a buffered reader swallows all three bytes and
+    # returns the ESC, and `select` on the descriptor then reports nothing
+    # pending — because the rest is in Python's buffer, not in the kernel's.
+    #
+    # The cases below are written the way a terminal sends them: whole
+    # sequences, in one write, read through an ordinary buffered stream. They
+    # fail on the buffered reader and pass on the unbuffered one.
+    import io
+
+    def over_a_pipe(raw: bytes):
+        r, w = os.pipe()
+        os.write(w, raw)
+        stream = io.TextIOWrapper(io.open(r, 'rb'))
+        try:
+            return read_key(stream)
+        finally:
+            # Held until here on purpose: a temporary is collected mid-call
+            # and closes the descriptor under the reader, which reports EOF
+            # and looks exactly like the bug this is testing for.
+            os.close(w)
+            stream.close()
+
+    for raw, want in ((b'\x1b[A', 'up'), (b'\x1b[B', 'down'),
+                      (b'\x1b[C', 'right'), (b'\x1b[D', 'left'),
+                      (b'\x1b[H', 'home'), (b'\x1b[F', 'end'),
+                      (b'\r', 'enter'), (b'q', 'q')):
+        got = over_a_pipe(raw)
+        assert got == want, f'{raw!r} over a descriptor -> {got!r}, wanted {want!r}'
+
+    # A lone Escape still has to read as Escape, or leaving a screen breaks.
+    assert over_a_pipe(b'\x1b') == 'esc', over_a_pipe(b'\x1b')
+
+    # A click arrives as press and release in one write, like a terminal sends
+    # it, and still resolves to one event.
+    click = over_a_pipe(b'\x1b[<0;6;9M\x1b[<0;6;9m')
+    assert isinstance(click, Mouse) and (click.col, click.row) == (5, 8), click
+
+    # A multi-byte character survives being read one byte at a time.
+    assert over_a_pipe('ü'.encode()) == 'ü', repr(over_a_pipe('ü'.encode()))
 
     print('keyreader selfcheck: ok')
     return 0
