@@ -2114,6 +2114,39 @@ def _selfcheck():
             press(sa, st, 'pool:add', 'enter')
         ok('a reserved pool key is refused', st.doc.text() == before)
 
+        # -- every screen against the real config.toml -----------------------
+        # The fixtures above are shapes this file invented. A real config has
+        # `[services]` with nested oauth tables, `[models]`, `[providers]`, and
+        # whatever the user wrote by hand — and a screen that renders those
+        # wrongly, or writes while merely drawing, would pass everything above.
+        # Skipped when there is no config, so this stays runnable anywhere.
+        if CONFIG.exists():
+            original = CONFIG.read_text()
+            live = Editing(CONFIG, TomlLines(original), True)
+            made = {
+                'permission': lambda: screen_permission(live),
+                'extra dirs': lambda: screen_extra_dirs(live),
+                'loop': lambda: screen_loop(live),
+                'thinking': lambda: screen_thinking(live),
+                'tool sets': lambda: screen_toolsets(live),
+                'subagent': lambda: screen_subagent(live),
+                'hooks': lambda: screen_hooks(live),
+                'main': lambda: screen_main(live),
+            }
+            for name, make in made.items():
+                screen = make()
+                rows = screen.build(live)
+                ok(f'{name}: builds against the real config', len(rows) > 0)
+                # Values are lambdas that read the parsed document; calling
+                # them is what a draw does, and it is where a wrong assumption
+                # about a real file surfaces.
+                for row in rows:
+                    row.value(live)
+                    row.note(live)
+                lines = m.render(screen, live, rows, m.first_selectable(rows))
+                ok(f'{name}: draws against the real config', len(lines) > 0)
+            ok('drawing never writes', live.doc.text() == original)
+
         # -- the top level -------------------------------------------------
         st = editing()
         keys = [r.key for r in screen_main(st).build(st) if r.selectable]

@@ -139,6 +139,13 @@ observed. That is a different, much smaller question than the one this section
 used to ask, and it needs one tool call in a live session to settle: start
 Kimi, let it read a file, look at the file again.
 
+It has to be a live session, and that was checked rather than assumed. With
+four hooks configured — `SessionStart`, `SessionHeartbeat`, `PreToolUse`,
+`TurnStarted` — against a throwaway `KIMI_CODE_HOME`, none of `--version`,
+`--help`, `doctor` or `sessions` fired a single one. No cheap subcommand
+creates a session scope, so there is no way to exercise the hook system
+without a real session.
+
 #### What the wiring says about the remaining half
 
 `PreToolUse` is not left unconnected. `registerListeners()` resolves the tool
