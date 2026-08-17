@@ -173,6 +173,13 @@ if [ "${1:-}" = --full ]; then
     else
       echo '  skip — no .work/bundle.js; run ./kimi-patch.sh --extract'
     fi
+
+    # The guard's whole reason for existing: patch, let Kimi replace the
+    # binary the way an auto-update does, and check that it notices and puts
+    # the patches back. Two full patch runs, so it lives here rather than in
+    # the fast suite.
+    bash "$HERE/lib/test_guard_cycle.sh" >/dev/null 2>&1
+    check $? 'guard survives a simulated auto-update (patch, replace, repair)'
   fi
 fi
 

@@ -23,7 +23,7 @@ beobachtet · `offen` noch nicht gebaut.
  9. Prompt-Kosten berichten     | lib/prompt-cost.py                        | done
 10. Werkzeug-Kosten berichten   | lib/list-tools.py                         | done
 11. Overrides mitmigrieren      | lib/migrate-prompts.py                    | done
-12. Nach Update neu patchen     | lib/kimi-guard.sh + launchd               | ungetestet
+12. Nach Update neu patchen     | lib/kimi-guard.sh + launchd               | done*
 13. Systemdateien fernhalten    | lib/os-cruft.txt                          | done
 14. Testsuite                   | test.sh, test.sh --full                   | done
 15. Beispiel-Patch (Banner)     | patches/00-banner.js                      | done
@@ -132,8 +132,18 @@ Sekunden liest; sie ist am Rand schlechter und sagt das im Kopfkommentar.
 
 ## Anmerkungen zu den nicht offensichtlichen Zeilen
 
-**12** — Der Wächter ist gebaut und hat 16 grüne Tests, aber der launchd-Agent
-wurde nie installiert. Ein echtes Auto-Update hat er also noch nicht überstanden.
+**12** — Der Reparaturweg ist jetzt einmal vollständig gelaufen, in einer
+Sandbox auf einer Kopie der Baseline: patchen, das Binary so ersetzen wie ein
+Auto-Update es tut, und prüfen, dass der Wächter es merkt und die Patches
+zurückbringt. Er meldet `pristine — the patches are gone` mit rc=10, repariert,
+und beide Marker stehen danach wieder im Binary, das startet. Die Gegenprobe
+gehört dazu: bei einem Versionswechsel meldet er rc=11, rührt das Binary nicht
+an und verweist an einen Menschen. `lib/test_guard_cycle.sh` fährt das wieder,
+`./test.sh --full` ruft es auf.
+
+Das `*` bleibt aus einem Grund: der launchd-Agent selbst wurde nie installiert.
+Was geprüft ist, ist was er auslöst — nicht, dass er zur richtigen Sekunde
+auslöst.
 
 **16** — Live bestätigt am 2026-08-13: mit
 `disabled = ["CronCreate","CronList","CronDelete"]` antwortet Kimi auf die

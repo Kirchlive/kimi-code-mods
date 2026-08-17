@@ -365,6 +365,14 @@ lib/kimi-guard.sh repair   # put the patches back if it is not
 lib/kimi-guard.sh plist    # a launchd agent that repairs on every rewrite
 ```
 
+That cycle has been run end to end, in a sandbox on a copy of the baseline:
+patch, replace the binary the way an update does, and watch the guard notice
+and put the patches back. It reports `pristine — the patches are gone` with
+exit 10, repairs, and both markers are in the binary afterwards. The refusal
+is checked too: on a version change it exits 11, leaves the binary byte for
+byte as it found it, and hands over to a human. `lib/test_guard_cycle.sh` runs
+it again; `./test.sh --full` calls it.
+
 Install the watcher once:
 
 ```
