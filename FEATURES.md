@@ -66,16 +66,22 @@ beobachtet · `offen` noch nicht gebaut.
 49. Werkzeug-Presets            | toolsets.conf, config-menu Punkt 8        | ungetestet
 ```
 
-Zeile 36 ist eingeschaltet, angewandt und im installierten Binary
-nachgewiesen: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md", "agents.md", "CLAUDE.md",
-"claude.md"]`, ad-hoc signiert, startet und meldet 0.36.0.
+Zeile 36 läuft im installierten Binary: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md",
+"agents.md", "CLAUDE.md", "claude.md"]`, ad-hoc signiert, startet, meldet 0.36.0.
 
-`ungetestet` heißt bei den übrigen genau eine Sache: der Patch findet seine Anker im
-echten Bundle, verändert es, weigert sich beim zweiten Anwenden und das Ganze
-ergibt zusammen noch gültiges JavaScript — das prüft `lib/test_patches.mjs`
-gegen `.work/bundle.js`. Was noch aussteht, ist die Beobachtung in einer
-laufenden Sitzung. Bei den Zeilen 36 bis 45 ist das ein Patchlauf und ein
-Blick; bei 41 ist es mehr, siehe unten.
+Die Zeilen 37 bis 45 sind bis an die Grenze geprüft, die ohne eine laufende
+Sitzung erreichbar ist. Alle fünfzehn Patches wurden gemeinsam eingeschaltet,
+in einer Sandbox auf eine Kopie der Baseline angewandt — **15 angewandt, kein
+No-op** — und im erzeugten Binary Marker für Marker nachgewiesen: achtzehn
+Stellen, alle vorhanden, Binary neu signiert, startet und meldet 0.36.0. Was
+bleibt, ist die Wirkung im Betrieb: dass ein Rahmen gut aussieht, dass die
+Verbrotation nicht flackert, dass der Router die Stufe trifft, die man erwartet
+hätte. Das ist Anschauen, nicht Prüfen, und dafür braucht es dich.
+
+Ein Mangel kam dabei heraus und ist behoben: `patch-settings.conf` schneidet
+Leerzeichen am Wertende ab, also war `user_message_marker = > ` nicht
+aufschreibbar — das Präfix klebte am Text. Der Patch hängt das Leerzeichen
+jetzt selbst an, wie Kimis eigenes `"✨ "` es hat.
 
 ## Bewusst nicht gebaut
 

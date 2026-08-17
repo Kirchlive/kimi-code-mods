@@ -23,6 +23,15 @@
 // is the difference between changing your prompt symbol and flattening every
 // message in the transcript to look the same.
 //
+// THE TRAILING SPACE IS ADDED HERE, AND HAS TO BE
+// Kimi's own marker is `"✨ "` — symbol, then a space, because the text is
+// concatenated straight onto it. `patch-settings.conf` trims its values, so
+// `user_message_marker = > ` reaches this patch as `>` and there is no way to
+// write the space down at all. Rather than teach the settings file about
+// quoting for one setting, the space is added here when it is missing. `none`
+// still means no marker, and a marker that already ends in a space is left
+// alone.
+//
 // WHY THE FRAME IS DRAWN BEFORE THE TRUNCATION, NOT AFTER
 // The last thing `render` does is push every line through
 // `truncateToWidth(line, safeWidth, "…")` and then store the result in
@@ -122,9 +131,11 @@ let out = js;
 // ------------------------------------------------------------------ 1. marker
 
 if (WANTS_MARKER) {
+  const text = MARKER === 'none' ? ''
+    : (MARKER.endsWith(' ') ? MARKER : MARKER + ' ');
   const ANCHOR = 'const marker = this.bullet ?? "✨ ";';
   const REPLACEMENT = 'const marker = this.bullet ?? '
-    + JSON.stringify(MARKER === 'none' ? '' : MARKER) + ';';
+    + JSON.stringify(text) + ';';
 
   if (out.includes(REPLACEMENT)) throw new Error('already patched');
   once(out, ANCHOR, 'the user message marker');
