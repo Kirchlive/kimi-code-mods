@@ -1006,6 +1006,36 @@ def _selfcheck() -> int:
         pos5, _, _ = handle(st, items, 0, ev, row_map)
         check('decoded click reaches the entry', pos5 == idx, pos5)
 
+        # -- the switches a patch reads and the ones the menu offers --------
+        # These are two lists in two languages that have to agree, and nothing
+        # forces them to. A patch that reads an unregistered key gets its
+        # fallback for ever and has no row; a registered key no patch reads is
+        # a row that does nothing. Both are silent, so they are checked here
+        # against the patches on disk rather than trusted.
+        asked = set()
+        for patch in (ROOT / 'patches').glob('*.js'):
+            if is_os_cruft(patch.name):
+                continue
+            asked |= set(re.findall(r"settings\.get\(\s*'([a-z_]+)'",
+                                    patch.read_text(encoding='utf8', errors='replace')))
+        check('every switch a patch reads is registered',
+              asked <= set(ps.DEFAULTS), sorted(asked - set(ps.DEFAULTS)))
+        check('every registered switch is read by a patch',
+              set(ps.DEFAULTS) <= asked, sorted(set(ps.DEFAULTS) - asked))
+        check('every switch has a menu row and help',
+              set(ps.DEFAULTS) <= set(PATCH_HELP),
+              sorted(set(ps.DEFAULTS) - set(PATCH_HELP)))
+        check('every help entry names a switch that exists',
+              set(PATCH_HELP) <= set(ps.DEFAULTS),
+              sorted(set(PATCH_HELP) - set(ps.DEFAULTS)))
+        # The third element of a help entry locates the patch behind the row.
+        # A needle that matches nothing would show "patch not installed" on a
+        # switch whose patch is right there.
+        for key, (_, _, needle) in PATCH_HELP.items():
+            check(f'{key}: its patch is findable by "{needle}"',
+                  any(needle in p.name.lower() for p in (ROOT / 'patches').glob('*.js')),
+                  needle)
+
         # -- submenus are screens too --------------------------------------
         # Every submenu used to end in `input()` and a digit. The point of the
         # rewrite is that they are now the same kind of object as the root
