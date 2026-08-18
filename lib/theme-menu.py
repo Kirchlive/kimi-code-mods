@@ -247,6 +247,18 @@ def tint(text: str, hex_value: str) -> str:
     return f'{code}{text}\x1b[0m' if code else text
 
 
+def embolden(line: str) -> str:
+    """The same line in bold, without losing any of its colours.
+
+    Bold cannot simply wrap the line: each coloured run already ends in a
+    reset, and a reset clears weight along with colour — so a single `1m` in
+    front would survive exactly as far as the first `tint`. Setting it again
+    after every reset is what makes the whole line heavy rather than its first
+    few characters.
+    """
+    return '\x1b[1m' + line.replace('\x1b[0m', '\x1b[0m\x1b[1m') + '\x1b[0m'
+
+
 # What a Kimi session looks like, in the tokens that colour it. Every line is
 # here because a token drives it: change `roleUser` and the prompt line moves,
 # change `diffAdded` and the `+` line does. A palette is judged by looking at
@@ -295,22 +307,28 @@ def preview(palette: dict, highlight: str = '') -> list[str]:
          + tint('✗ failed', c('error'))),
         ('textStrong', tint('The directory holds 123 files.', c('textStrong'))),
     ]
-    # The frame itself is `border`, so it is listed as a line of its own —
-    # otherwise the one token that surrounds everything is the one with
-    # nothing pointing at it.
-    body.insert(0, ('border', ''))
-    top = tint('┌' + '─' * w + '┐', c('border'))
-    bottom = tint('└' + '─' * w + '┘', c('border'))
-    edge = tint('│', c('border'))
-    out = ['', ' Preview', '', top]
+    # `border` draws the frame around all of this rather than any line in
+    # it, so it is the frame that goes bold when it is the one selected. A
+    # placeholder row would be the one token in the palette whose highlight
+    # shows nothing.
+    frame_lit = highlight == 'border'
+    heavy = embolden if frame_lit else (lambda x: x)
+    top = heavy(tint('┌' + '─' * w + '┐', c('border')))
+    bottom = heavy(tint('└' + '─' * w + '┘', c('border')))
+    edge = heavy(tint('│', c('border')))
+    out = ['', ' Preview', '', top + ('◀' if frame_lit else '')]
     for owner, line in body:
         pad = ' ' * max(0, w - 1 - m.visible(line))
-        mark = '◀' if (highlight and owner and highlight in owner) else ' '
-        out.append(f'{edge} {line}{pad}{edge}{mark}')
-    out.append(bottom)
+        # `highlight in owner` would match `text` inside `textDim`, so the
+        # owners are compared as whole words.
+        mine = bool(highlight) and highlight in owner.split()
+        mark = '◀' if mine else ' '
+        out.append(f'{edge} {embolden(line) if mine else line}{pad}{edge}{mark}')
+    out.append(bottom + ('◀' if frame_lit else ''))
     if highlight:
-        drawn = any(highlight in owner for owner, _ in body if owner)
-        out += ['', f'  ◀ marks what {highlight} draws' if drawn else
+        drawn = frame_lit or any(highlight in owner.split()
+                                 for owner, _ in body if owner)
+        out += ['', f'  {highlight} draws the bold line' if drawn else
                 f'  {highlight} draws nothing in this preview']
     return out
 
@@ -409,7 +427,10 @@ def screen_tokens(st: ThemeState) -> m.Screen:
             write_theme(s.theme, s.dir)
 
     return m.Screen(build, activate=act, cycle=cyc, reload=lambda s: s.reload(),
-                    aside=lambda s: preview(effective(s.theme)),
+                    aside=lambda s, sel: preview(
+                        effective(s.theme),
+                        sel.key[4:] if sel is not None and sel.key.startswith('tok:')
+                        else ''),
                     help_line=m.HELP_DEL, title='Theme')
 
 
@@ -497,7 +518,7 @@ def screen_themes(st: ThemeState) -> m.Screen:
             s.message = f'not deleted — {e}'
 
     return m.Screen(build, activate=act, reload=lambda s: s,
-                    aside=lambda s: preview(effective(
+                    aside=lambda s, sel: preview(effective(
                         read_theme(_hovered(s), s.dir))) if list_themes(s.dir) else [],
                     help_line=m.HELP_DEL, title='Themes')
 
@@ -626,9 +647,12 @@ def screen_colors(tokens: list[str], title: str,
             s.message = f'{token} = {raw}'
         return True
 
-    def aside(s: ThemeState) -> list[str]:
+    def aside(s: ThemeState, sel=None) -> list[str]:
         name, _ = editable_theme(directory)
-        return preview(effective(read_theme(name, directory))) if name else []
+        if not name:
+            return []
+        token = sel.key[4:] if sel is not None and sel.key.startswith('tok:') else ''
+        return preview(effective(read_theme(name, directory)), token)
 
     return m.Screen(build, activate=act, reload=lambda s: s, aside=aside,
                     help_line=m.HELP_DEL, title=title), state
@@ -824,22 +848,76 @@ def _selfcheck() -> int:
         owners = set()
         for hit in _re.finditer(r"\('([a-zA-Z ]*)',", seg):
             owners |= set(hit.group(1).split())
-        owners.add('border')                       # the frame around it all
+        owners.add('border')          # the frame, emboldened rather than a row
         names = {t for t, _ in TOKENS}
         check('every token draws something in the preview',
               names <= owners, sorted(names - owners))
         check('the preview names no token that does not exist',
               owners <= names | {'border'}, sorted(owners - names))
 
-        # And the preview marks the one being edited, so "it changed
-        # somewhere" is not the answer to a nudge on a bar.
+        # And the preview marks the one under the cursor, so "it changed
+        # somewhere" is not the answer to a nudge on a bar. Bold rather than
+        # only an arrow: the line itself is what you are looking at.
         marked = preview(BUILT_IN['dark'], 'roleUser')
         check('the edited token is marked', any('◀' in l for l in marked))
+        check('and its line is drawn bold',
+              any('\x1b[1m' in l and 'list the dir' in l for l in marked),
+              [l for l in marked if 'list the dir' in l])
         check('and named under the frame',
               any('roleUser' in l for l in marked), marked[-2:])
+        check('only that line is bold',
+              len([l for l in marked if '\x1b[1m' in l]) == 1,
+              [m.ANSI.sub('', l) for l in marked if '\x1b[1m' in l])
+
+        # Bold has to survive the colours already in the line: each coloured
+        # run ends in a reset, and a reset clears weight too, so a single
+        # bold in front would stop at the first one.
+        line = tint('a', '#ff0000') + tint('b', '#00ff00')
+        heavy = embolden(line)
+        check('every coloured run in a line is emboldened',
+              heavy.count('\x1b[1m') == 3, heavy.count('\x1b[1m'))
+        check('and the text is unchanged', m.ANSI.sub('', heavy) == 'ab',
+              m.ANSI.sub('', heavy))
+        check('bolding does not change how wide a line is',
+              m.visible(heavy) == m.visible(line))
+
+        # `text` is a token and so is `textDim`; a substring match would
+        # bold the wrong line every time the plain one is selected.
+        only_dim = preview(BUILT_IN['dark'], 'textDim')
+        bold_dim = [m.ANSI.sub('', l) for l in only_dim if '\x1b[1m' in l]
+        check('a token is matched as a whole word',
+              all('Read' not in l for l in bold_dim), bold_dim)
+        check('and textDim finds its own lines', len(bold_dim) == 2, bold_dim)
+
         plain = preview(BUILT_IN['dark'])
         check('with nothing to mark, nothing is marked',
               not any('◀' in l for l in plain))
+        check('and nothing is bold',
+              not any('\x1b[1m' in l for l in plain))
+
+        # The screen hands the cursor's row to the preview, which is what
+        # makes any of this follow the selection.
+        st_tok = ThemeState(d, 'midnight')
+        scr_tok = screen_tokens(st_tok)
+        rows_tok = scr_tok.build(st_tok)
+        on_role = next(r for r in rows_tok if r.key == 'tok:roleUser')
+        check('the token screen highlights the row under the cursor',
+              any('◀' in l for l in scr_tok.aside(st_tok, on_role)))
+        on_base = next(r for r in rows_tok if r.key == '__base')
+        check('a row that is not a token highlights nothing',
+              not any('◀' in l for l in scr_tok.aside(st_tok, on_base)))
+
+        # `border` draws the frame rather than a line inside it, so that is
+        # what goes bold — the one token whose highlight would otherwise
+        # point at an empty row.
+        framed = preview(BUILT_IN['dark'], 'border')
+        check('selecting border emboldens the frame',
+              '\x1b[1m' in framed[3] and framed[3].rstrip().endswith('◀'),
+              m.ANSI.sub('', framed[3]))
+        check('and says so rather than calling it missing',
+              any('draws the bold line' in l for l in framed), framed[-2:])
+        check('and neither does no row at all',
+              not any('◀' in l for l in scr_tok.aside(st_tok, None)))
 
         # Backspace on a token row clears the override and writes the file;
         # ‹›, which used to do it, leaves the colour alone.

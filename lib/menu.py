@@ -166,15 +166,19 @@ class Screen:
     def reload(self, st):
         return self._reload(st) if self._reload is not None else st
 
-    def aside(self, st) -> list[str]:
+    def aside(self, st, selected=None) -> list[str]:
         """A preview drawn beside the rows, tweakcc's second column.
 
         A colour, a spinner and a message frame are things you judge by
         looking at them, and a list of names is not a substitute for that.
         Rows and preview are rendered together so the two cannot disagree
         about the state they are both describing.
+
+        The selected row is handed over too, because a preview of nineteen
+        palette tokens has to be able to say which one the cursor is on —
+        otherwise it shows everything and answers nothing.
         """
-        return list(self._aside(st)) if self._aside is not None else []
+        return list(self._aside(st, selected)) if self._aside is not None else []
 
     def delete(self, st, item) -> bool:
         """Remove what a row stands for. False when the row has nothing to remove."""
@@ -203,6 +207,7 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
     lines = list(screen.header(st))
     lines.append('')
 
+    sel_row = items[cursor] if 0 <= cursor < len(items) else None
     for i, it in enumerate(items):
         if it.kind == 'sep':
             lines.append('  ' + '─' * RULE_WIDTH)
@@ -226,7 +231,7 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
     # a sentence is what decides how wide the left column is if it is allowed
     # to. Left in, one long explanation would push a preview that fits
     # comfortably onto the line below the whole menu.
-    lines = beside(lines, screen.aside(st), width)
+    lines = beside(lines, screen.aside(st, sel_row), width)
 
     lines.append('')
     sel = items[cursor] if 0 <= cursor < len(items) else None
@@ -994,7 +999,7 @@ def _selfcheck() -> int:
     # where it looks like it should. Both halves of that matter: the columns
     # have to line up, and the mapping has to survive the padding.
     wide = Screen(build, activate=activate, cycle=cycle, title='with a preview',
-                  aside=lambda st: ['┌────┐', '│ ab │', '└────┘'])
+                  aside=lambda st, sel: ['┌────┐', '│ ab │', '└────┘'])
     rows_w = wide.build(store)
     map_w: dict[int, int] = {}
     out_w = render(wide, store, rows_w, 0, map_w, width=200)
@@ -1015,6 +1020,18 @@ def _selfcheck() -> int:
           narrow.index('└────┘') < len(narrow) - 1, narrow[-4:])
     check('and nothing is beside the rows there',
           not any('│' in l and 'Colour' in l for l in narrow))
+
+    # The preview is told which row the cursor is on. Without it a palette
+    # preview can only show everything, which answers nothing.
+    seen = []
+    told = Screen(build, activate=activate, cycle=cycle, title='told',
+                  aside=lambda st, sel: seen.append(sel) or ['x'])
+    told_rows = told.build(store)
+    render(told, store, told_rows, 0)
+    check('the preview is told the selected row',
+          seen and seen[-1] is told_rows[0], seen)
+    render(told, store, told_rows, 3)
+    check('and follows the cursor', seen[-1] is told_rows[3], seen[-1])
 
     check('a wide character counts as two columns', visible('🌕') == 2)
     check('colour codes count as none', visible(f'{DIM}ab{RESET}') == 2)

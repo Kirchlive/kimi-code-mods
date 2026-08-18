@@ -893,7 +893,7 @@ def spinner_frames(st: State) -> list[str]:
     return ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 
-def spinner_preview(st: State) -> list[str]:
+def spinner_preview(st: State, sel=None) -> list[str]:
     """One frame of the working indicator, as it will be drawn."""
     frames = spinner_frames(st)
     rate = st.settings.get('spinner_interval_ms', 'default')
@@ -999,7 +999,7 @@ def verb_words(st: State) -> list[str]:
     return [w.strip() for w in raw.split(',') if w.strip()]
 
 
-def verb_preview(st: State) -> list[str]:
+def verb_preview(st: State, sel=None) -> list[str]:
     fmt = st.settings.get('thinking_verbs_format', '{}')
     words = verb_words(st)
     frame = (spinner_frames(st) or ['✻'])[0]
@@ -1103,7 +1103,7 @@ STYLE_SGR = {'default': '\x1b[1m', 'plain': '', 'italic': '\x1b[3m',
              'strikethrough': '\x1b[9m'}
 
 
-def user_message_preview(st: State) -> list[str]:
+def user_message_preview(st: State, sel=None) -> list[str]:
     """Your own message drawn twice: as Kimi does it, and as you asked for it."""
     marker = st.settings.get('user_message_marker', 'default')
     border = st.settings.get('user_message_border', 'off')
