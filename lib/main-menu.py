@@ -781,6 +781,11 @@ def screen_settings(st: State, group: str) -> m.Screen:
         # row on this screen the patches do not read: `bin/kimi` exports it,
         # so it takes effect at the next start with no patch run at all.
         if group == 'misc':
+            rows.append(Item('submenu', 'Composer frame colours',
+                             lambda x: 'border, borderFocus',
+                             key='colors:border,borderFocus',
+                             help='The frame the composer border setting draws '
+                                  'is coloured by these two palette tokens.'))
             rows.append(Item('cycle', 'Fullscreen renderer',
                              lambda x: 'always' if env_value(
                                  x.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1'
@@ -794,6 +799,9 @@ def screen_settings(st: State, group: str) -> m.Screen:
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
+        if item.key.startswith('colors:'):
+            open_colors(item.key[7:].split(','), 'Composer frame colours')
+            return True
         if item.key in ps.DEFAULTS and item.key not in ps.CHOICES:
             current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
             raw = ask(item.key, current,
@@ -815,6 +823,17 @@ def screen_settings(st: State, group: str) -> m.Screen:
 
     return m.Screen(build, activate=act, cycle=cyc, delete=restore,
                     reload=reload_state, help_line=m.HELP_DEL, title=title)
+
+
+def open_colors(tokens: list[str], title: str) -> None:
+    """Open the palette tokens that decide how one screen looks.
+
+    Every colour in Kimi comes from the theme, so a colour row here would be a
+    second place to set one value. This opens the first place instead, showing
+    only the tokens the screen you came from is drawn with.
+    """
+    screen, state = themes.screen_colors(tokens, title)
+    m.loop(screen, state)
 
 
 def patch_list(patch: Path | None, name: str) -> list[str]:
@@ -936,6 +955,10 @@ def screen_thinking_style(st: State) -> m.Screen:
                  help='Separate frames with spaces, or write them run together. '
                       'Picked up by the custom row above.'),
             Item('sep'),
+            Item('submenu', 'Colours', lambda x: 'primary, textDim',
+                 key='colors:primary,textDim',
+                 help='The spinner while composing is `primary`; the thinking '
+                      'line is `textDim`.'),
             Item('action', 'Back', lambda x: '', key='back'),
         ]
         return rows
@@ -943,6 +966,9 @@ def screen_thinking_style(st: State) -> m.Screen:
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
+        if item.key.startswith('colors:'):
+            open_colors(item.key[7:].split(','), 'Spinner colours')
+            return True
         if item.key.startswith('style:'):
             ps.set_value('spinner_style', item.key[6:], s.settings_path)
         elif item.key == 'spinner_frames':
@@ -1015,6 +1041,9 @@ def screen_thinking_verbs(st: State) -> m.Screen:
                  Item('action', 'Kimi-mods\' own list', lambda x: '', key='reset',
                       help='Puts the built-in words back.'),
                  Item('sep'),
+                 Item('submenu', 'Colours', lambda x: 'textDim',
+                      key='colors:textDim',
+                      help='The word beside the spinner is drawn in `textDim`.'),
                  Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -1033,6 +1062,9 @@ def screen_thinking_verbs(st: State) -> m.Screen:
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
+        if item.key.startswith('colors:'):
+            open_colors(item.key[7:].split(','), 'Thinking colours')
+            return True
         if item.key == 'add':
             word = ask('A word', hint='Shown beside the spinner. '
                                       'Punctuation is yours to include.')
@@ -1123,7 +1155,12 @@ def screen_user_message(st: State) -> m.Screen:
                                  on_delete=restore,
                                  help=help_text + '  (enter types one, '
                                                   'backspace restores the default)'))
-        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        rows += [Item('sep'),
+                 Item('submenu', 'Colours', lambda x: 'roleUser in your theme',
+                      key='colors:roleUser',
+                      help='Every colour in Kimi comes from the palette; this '
+                           'opens the token your own messages are drawn in.'),
+                 Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
     def restore(s: State, item: Item) -> None:
@@ -1132,6 +1169,9 @@ def screen_user_message(st: State) -> m.Screen:
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
+        if item.key.startswith('colors:'):
+            open_colors(item.key[7:].split(','), 'Your message colour')
+            return True
         if item.key in keys and item.key not in ps.CHOICES:
             current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
             raw = ask(item.key, current,
@@ -1482,7 +1522,8 @@ def _selfcheck() -> int:
             # rather than opening a door.
             check(f'{group}: one row per switch',
                   [r.key for r in grows if r.selectable
-                   and r.key not in ('back', 'fullscreen')] == keys,
+                   and r.key not in ('back', 'fullscreen')
+                   and not r.key.startswith('colors:')] == keys,
                   [r.key for r in grows])
             check(f'{group}: every switch row carries help',
                   all(r.help for r in grows if r.key in keys),
@@ -1674,6 +1715,24 @@ def _selfcheck() -> int:
         check('environment screen lists variables', len(env_names) > 5, env_names)
         check('every environment row is a launcher variable',
               all(n.startswith('KIMI') for n in env_names), env_names)
+
+        # -- the colour rows point at tokens that exist ---------------------
+        # A row offering to edit `roleUsr` would open a picker that writes a
+        # key Kimi drops without a word. The names are spelled out in five
+        # places, so they are checked against the palette rather than trusted.
+        known = {t for t, _ in themes.TOKENS}
+        colour_rows = []
+        for maker in (lambda: screen_user_message(st),
+                      lambda: screen_thinking_style(st),
+                      lambda: screen_thinking_verbs(st),
+                      lambda: screen_settings(st, 'misc')):
+            colour_rows += [r.key[7:] for r in maker().build(st)
+                            if r.key.startswith('colors:')]
+        check('every screen that shows a colour row has one', len(colour_rows) == 4,
+              colour_rows)
+        named = {t for row in colour_rows for t in row.split(',')}
+        check('every colour row names real palette tokens',
+              named <= known, sorted(named - known))
 
         # -- the previews describe the settings they are drawn beside -------
         # A preview that does not follow the setting is worse than none: it

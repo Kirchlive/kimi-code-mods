@@ -178,6 +178,24 @@ a handful of screens, which meant stepping through a list of saved tool sets
 to read it deleted one. One key, one meaning, and the destructive one is the
 key that already means "remove" everywhere else.
 
+**A colour is picked, not typed.** Six hex digits are a description of a
+colour rather than the colour itself, and the difficult part is getting from
+the one you can picture to those digits. `menu.color` draws three bars — hue,
+saturation, lightness, each *in* the colours it selects — with ←→ to nudge,
+shift+←→ for ten at a time, `a` to switch to RGB when a value has to match
+something exact, `p` to lift a hex value out of the clipboard and `h` to type
+one. Beside it runs the same mock transcript the theme editor shows, following
+the bars as they move, with `◀` against the line the token being edited draws.
+
+Every colour in Kimi comes from the palette, so the screens whose look depends
+on one — your own messages, the spinner, the composer frame — carry a
+**Colours** row that opens those tokens rather than offering a second place to
+set the same value. That needs a theme of your own that is also the one in
+use; when there is not one, the screen says so and offers to make it. Which
+theme is in use lives in `~/.kimi-code/tui.toml`, not `config.toml` — Kimi
+splits its settings and says so in the file it writes — and the theme list
+both shows it and can change it.
+
 **Screens that configure something visual show it.** Themes, the spinner, the
 rotating verb and your own message frame each draw a preview beside the rows —
 tweakcc's second column, and the same reasoning: `glow` and `wave` are names

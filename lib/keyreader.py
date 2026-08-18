@@ -44,6 +44,16 @@ ESC_TIMEOUT = 0.05
 ARROWS = {'A': 'up', 'B': 'down', 'C': 'right', 'D': 'left',
           'H': 'home', 'F': 'end'}
 
+# A held modifier turns `ESC [ C` into `ESC [ 1 ; 5 C`, where the number is a
+# bitmask over shift, alt and control offset by one. Reported as a prefix on
+# the key name — `ctrl-right` — because a screen that wants a bigger step from
+# a held key needs to know that it was held, and one that does not can go on
+# matching the bare name.
+MODIFIERS = {2: 'shift-', 3: 'alt-', 4: 'shift-alt-', 5: 'ctrl-',
+             6: 'shift-ctrl-', 7: 'alt-ctrl-', 8: 'shift-alt-ctrl-'}
+
+MODIFIED_ARROW = re.compile(r'^1;(\d+)([A-DHF])$')
+
 # `?1000` reports button presses and releases only — no motion, which is all a
 # menu needs and the quietest thing to ask a terminal for. `?1006` switches the
 # reports to SGR encoding; without it columns past 223 are unreportable,
@@ -317,6 +327,9 @@ def read_key(stream=None):
             press_row = None
             return ev
 
+        mod = MODIFIED_ARROW.match(seq)
+        if mod is not None:
+            return MODIFIERS.get(int(mod.group(1)), '') + ARROWS[mod.group(2)]
         if seq and seq[-1] in ARROWS:
             return ARROWS[seq[-1]]
         if seq == '5~':
@@ -338,7 +351,9 @@ class FakeKeys:
     ENCODE = {'up': '\x1b[A', 'down': '\x1b[B', 'right': '\x1b[C',
               'left': '\x1b[D', 'home': '\x1b[H', 'end': '\x1b[F',
               'enter': '\r', 'esc': '\x1b', 'tab': '\t',
-              'backspace': '\x7f', 'ctrl-c': '\x03'}
+              'backspace': '\x7f', 'ctrl-c': '\x03',
+              'shift-right': '\x1b[1;2C', 'shift-left': '\x1b[1;2D',
+              'ctrl-right': '\x1b[1;5C', 'ctrl-left': '\x1b[1;5D'}
 
     def __init__(self, keys):
         self.buf = ''.join(self.ENCODE.get(k, k) for k in keys)
@@ -368,6 +383,15 @@ def _selfcheck() -> int:
     cases = [
         (['up'], 'up'), (['down'], 'down'), (['left'], 'left'),
         (['right'], 'right'), (['enter'], 'enter'), (['tab'], 'tab'),
+        # A held modifier is reported as a prefix, so a screen that wants a
+        # bigger step from a held key can tell, and one that does not goes on
+        # matching the bare name.
+        (['shift-right'], 'shift-right'), (['shift-left'], 'shift-left'),
+        (['ctrl-right'], 'ctrl-right'), (['\x1b[1;3D'], 'alt-left'),
+        (['\x1b[1;6C'], 'shift-ctrl-right'),
+        # An unknown modifier number keeps the key and drops the prefix,
+        # rather than reporting a key nobody handles.
+        (['\x1b[1;99C'], 'right'),
         (['q'], 'q'), (['ctrl-c'], 'ctrl-c'), (['backspace'], 'backspace'),
         (['esc'], 'esc'),
     ]

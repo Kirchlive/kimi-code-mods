@@ -22,8 +22,10 @@ Nothing here needs a terminal to be tested. `handle` takes a decoded key or a
 can be exercised without a TTY.
 """
 
+import colorsys
 import os
 import re
+import subprocess
 import sys
 import unicodedata
 from pathlib import Path
@@ -381,6 +383,224 @@ def field(title: str, value: str = '', hint: str = '', width: int = FIELD_WIDTH)
             if isinstance(key, Mouse) or len(key) != 1 or not key.isprintable():
                 continue
             text += key
+    finally:
+        show_cursor()
+
+
+# --------------------------------------------------------------------------
+# colours
+# --------------------------------------------------------------------------
+
+BAR_WIDTH = 44
+
+
+def hex_to_rgb(value: str) -> tuple[int, int, int]:
+    """`#RRGGBB` as three numbers. Anything unreadable comes back mid-grey."""
+    text = value.strip().lstrip('#')
+    if len(text) == 3:                      # #abc is a convenience here only;
+        text = ''.join(c * 2 for c in text)  # what gets written is always six
+    try:
+        return tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return (128, 128, 128)
+
+
+def rgb_to_hex(r: int, g: int, b: int) -> str:
+    return '#{:02x}{:02x}{:02x}'.format(max(0, min(255, int(round(r)))),
+                                        max(0, min(255, int(round(g)))),
+                                        max(0, min(255, int(round(b)))))
+
+
+def rgb_to_hsl(r: int, g: int, b: int) -> tuple[float, float, float]:
+    """Degrees and two percentages. `colorsys` speaks HLS, hence the swap."""
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    return (h * 360, s * 100, l * 100)
+
+
+def hsl_to_rgb(h: float, s: float, l: float) -> tuple[int, int, int]:
+    r, g, b = colorsys.hls_to_rgb((h % 360) / 360, l / 100, s / 100)
+    return (int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
+
+
+def bg(r: int, g: int, b: int) -> str:
+    return f'\x1b[48;2;{r};{g};{b}m'
+
+
+def fg(r: int, g: int, b: int) -> str:
+    return f'\x1b[38;2;{r};{g};{b}m'
+
+
+def gradient(at_fraction, position: float, width: int = BAR_WIDTH) -> str:
+    """A bar of colours with a marker on it.
+
+    `at_fraction(f)` gives the colour at 0…1 along the bar, so one function
+    draws hue, saturation, lightness and the three RGB channels without any of
+    them knowing how a bar is drawn. The marker is a bar character in black or
+    white, whichever the colour under it is further from, so it stays visible
+    at both ends of a lightness ramp — the place a fixed marker colour
+    disappears.
+    """
+    mark = max(0, min(width - 1, int(round(position * (width - 1)))))
+    out = []
+    for x in range(width):
+        r, g, b = at_fraction(x / max(1, width - 1))
+        if x == mark:
+            light = (r * 299 + g * 587 + b * 114) / 1000
+            ink = (0, 0, 0) if light > 140 else (255, 255, 255)
+            out.append(f'{bg(r, g, b)}{fg(*ink)}│')
+        else:
+            out.append(f'{bg(r, g, b)} ')
+    return ''.join(out) + RESET
+
+
+CHANNELS = {
+    'hsl': [('Hue', 360, '°'), ('Saturation', 100, '%'), ('Lightness', 100, '%')],
+    'rgb': [('Red', 255, ''), ('Green', 255, ''), ('Blue', 255, '')],
+}
+
+
+def clipboard() -> str:
+    """Whatever the system clipboard holds, or '' where there is no way to ask."""
+    for cmd in (['pbpaste'], ['wl-paste', '-n'], ['xclip', '-selection', 'clipboard', '-o']):
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode == 0:
+            return out.stdout.strip()
+    return ''
+
+
+# A hex colour lifted out of whatever the clipboard held — CSS, a JSON line, a
+# chat message. Bounded on both sides by "not a hex digit" rather than by a
+# word boundary: `deadbeef99` ends on one, and taking six digits out of the
+# middle of a longer run would be a colour nobody copied.
+HEX_ANYWHERE = re.compile(
+    r'(?<![0-9a-fA-F])#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![0-9a-fA-F])')
+
+
+def color(title: str, value: str = '#808080', hint: str = '', preview=None):
+    """Pick a colour on three bars. Returns `#rrggbb`, or None if cancelled.
+
+    A colour is the one setting that cannot be chosen from a list and should
+    not be typed: six hex digits are a description of a colour, not the colour
+    itself, and getting from the one you can see in your head to those digits
+    is the whole difficulty. Three bars drawn *in* the colours they select
+    turn it back into looking at something.
+
+    HSL is the default because its three axes are the ones people actually
+    reach for — a bit more blue, a bit less washed out, a bit darker. RGB is
+    one keystroke away for when a value has to match something exact.
+
+    `preview(hex)` supplies lines drawn beside the picker, so a palette token
+    can show what it does to a mock transcript while it is being dragged.
+    """
+    if not sys.stdin.isatty():
+        return None
+
+    r, g, b = hex_to_rgb(value)
+    h, s, l = rgb_to_hsl(r, g, b)
+    mode, row = 'hsl', 0
+    color_on = sys.stdout.isatty()
+
+    def current() -> tuple[int, int, int]:
+        return (int(round(r)), int(round(g)), int(round(b))) if mode == 'rgb' \
+            else hsl_to_rgb(h, s, l)
+
+    def channel_values() -> list[float]:
+        return [r, g, b] if mode == 'rgb' else [h, s, l]
+
+    def set_channel(i: int, v: float) -> None:
+        nonlocal r, g, b, h, s, l
+        limit = CHANNELS[mode][i][1]
+        v = max(0.0, min(float(limit), v))
+        if mode == 'rgb':
+            r, g, b = [v if j == i else x for j, x in enumerate((r, g, b))]
+            h, s, l = rgb_to_hsl(r, g, b)
+        else:
+            h, s, l = [v if j == i else x for j, x in enumerate((h, s, l))]
+            r, g, b = hsl_to_rgb(h, s, l)
+
+    def bar_for(i: int):
+        """The colour at each point of one bar, with the others held still."""
+        if mode == 'rgb':
+            return lambda f: tuple(int(round(f * 255)) if j == i else int(round(x))
+                                   for j, x in enumerate((r, g, b)))
+        if i == 0:
+            return lambda f: hsl_to_rgb(f * 360, s, l)
+        if i == 1:
+            return lambda f: hsl_to_rgb(h, f * 100, l)
+        return lambda f: hsl_to_rgb(h, s, f * 100)
+
+    try:
+        while True:
+            rr, gg, bb = current()
+            hex_now = rgb_to_hex(rr, gg, bb)
+            hh, ss, ll = rgb_to_hsl(rr, gg, bb)
+
+            lines = ['', ' ' + title, '']
+            if hint:
+                lines += [paint('  ' + hint, DIM, color_on)]
+            lines += [
+                paint('  ←→ adjust · shift+←→ by ten · ↑↓ change bar', DIM, color_on),
+                paint('  a switches rgb/hsl · p pastes · h types a hex value',
+                      DIM, color_on),
+                paint('  enter keeps it · esc leaves it as it was', DIM, color_on),
+                '',
+            ]
+            for i, (name, limit, unit) in enumerate(CHANNELS[mode]):
+                v = channel_values()[i]
+                label = f'{name} ({int(round(v))}{unit})'
+                mark = CURSOR if i == row else ' '
+                bar = gradient(bar_for(i), v / limit, BAR_WIDTH) if color_on else ''
+                lines.append(f'{mark} {label:<20} {bar}')
+                lines.append('')
+
+            swatch = f'{bg(rr, gg, bb)}      {RESET}' if color_on else '      '
+            lines += [
+                f'  Current: {swatch}',
+                '',
+                paint('  Hex        RGB                     HSL', DIM, color_on),
+                f'  {hex_now}    rgb({rr}, {gg}, {bb})'.ljust(37)
+                + f'hsl({int(round(hh))}, {int(round(ss))}%, {int(round(ll))}%)',
+            ]
+
+            body = beside(lines, list(preview(hex_now)) if preview else [],
+                          terminal_width())
+            sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+            sys.stdout.write(HIDE_CURSOR if color_on else '')
+            print('\n'.join(body))
+            sys.stdout.flush()
+
+            with raw_mode():
+                key = read_key()
+
+            if key == 'enter':
+                return hex_now
+            if key in ('esc', 'ctrl-c', 'eof'):
+                return None
+            if key == 'up':
+                row = (row - 1) % 3
+            elif key == 'down':
+                row = (row + 1) % 3
+            elif key in ('left', 'right'):
+                set_channel(row, channel_values()[row] + (1 if key == 'right' else -1))
+            elif key.endswith('-left') or key.endswith('-right'):
+                step = 10 if key.endswith('-right') else -10
+                set_channel(row, channel_values()[row] + step)
+            elif key == 'home':
+                set_channel(row, 0)
+            elif key == 'end':
+                set_channel(row, CHANNELS[mode][row][1])
+            elif key == 'a':
+                mode = 'rgb' if mode == 'hsl' else 'hsl'
+            elif key in ('p', 'h'):
+                got = clipboard() if key == 'p' else field(
+                    'Hex value', hex_now, hint='Six hex digits, with or without #.')
+                found = HEX_ANYWHERE.search(got or '')
+                if found:
+                    r, g, b = hex_to_rgb(found.group(1))
+                    h, s, l = rgb_to_hsl(r, g, b)
     finally:
         show_cursor()
 
@@ -800,6 +1020,55 @@ def _selfcheck() -> int:
     check('colour codes count as none', visible(f'{DIM}ab{RESET}') == 2)
     check('an empty aside changes nothing',
           beside(['a', 'b'], []) == ['a', 'b'])
+
+    # -- colours -------------------------------------------------------------
+    # The picker is the one screen whose whole job is arithmetic, and the
+    # arithmetic is the part that can be wrong without looking wrong: a hue
+    # that drifts by a degree each time it is converted ends up somewhere else
+    # after a few nudges.
+    check('hex parses', hex_to_rgb('#4FA8FF') == (79, 168, 255), hex_to_rgb('#4FA8FF'))
+    check('the short form is accepted on the way in',
+          hex_to_rgb('#abc') == hex_to_rgb('#aabbcc'))
+    check('something unreadable is grey, not an exception',
+          hex_to_rgb('not a colour') == (128, 128, 128))
+    check('hex is written back lower case and six digits',
+          rgb_to_hex(79, 168, 255) == '#4fa8ff', rgb_to_hex(79, 168, 255))
+    check('a channel out of range is clamped rather than wrapped',
+          rgb_to_hex(-20, 300, 128) == '#00ff80', rgb_to_hex(-20, 300, 128))
+
+    for probe in ('#4fa8ff', '#000000', '#ffffff', '#e47b58', '#7f7f7f'):
+        r0, g0, b0 = hex_to_rgb(probe)
+        h0, s0, l0 = rgb_to_hsl(r0, g0, b0)
+        check(f'{probe} survives a round trip through HSL',
+              rgb_to_hex(*hsl_to_rgb(h0, s0, l0)) == probe,
+              rgb_to_hex(*hsl_to_rgb(h0, s0, l0)))
+
+    check('hue wraps rather than clamping',
+          hsl_to_rgb(370, 100, 50) == hsl_to_rgb(10, 100, 50))
+
+    bar = gradient(lambda f: (int(f * 255), 0, 0), 0.5, width=10)
+    check('a bar carries one cell per column', bar.count('\x1b[48;2;') == 10)
+    check('and exactly one marker on it', bar.count('│') == 1, bar.count('│'))
+    left = gradient(lambda f: (0, 0, 0), 0.0, width=10)
+    right = gradient(lambda f: (0, 0, 0), 1.0, width=10)
+    check('the marker reaches both ends',
+          visible(left).index if False else
+          ANSI.sub('', left).index('│') == 0
+          and ANSI.sub('', right).index('│') == 9,
+          (ANSI.sub('', left), ANSI.sub('', right)))
+    check('a dark cell takes a light marker', '255;255;255' in left)
+    check('a light cell takes a dark marker',
+          '38;2;0;0;0' in gradient(lambda f: (255, 255, 255), 0.0, width=4))
+
+    check('a hex value is found inside other text',
+          HEX_ANYWHERE.search('rgb #E47B58 there').group(1) == 'E47B58')
+    check('and not in a longer run of hex digits',
+          HEX_ANYWHERE.search('deadbeef99') is None,
+          HEX_ANYWHERE.search('deadbeef99'))
+
+    # Without a terminal the picker returns None rather than blocking, the
+    # same rule `field` and `loop` follow.
+    check('the picker needs a terminal', color('t', '#ffffff') is None)
 
     # -- backspace removes ---------------------------------------------------
     removed = []

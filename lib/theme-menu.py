@@ -88,10 +88,69 @@ BUILT_IN = {
 }
 
 
+def kimi_home() -> Path:
+    home = os.environ.get('KIMI_CODE_HOME')
+    return Path(home) if home else Path.home() / '.kimi-code'
+
+
 def themes_dir() -> Path:
     """Where Kimi looks. `KIMI_CODE_HOME` moves it, and the tests rely on that."""
-    home = os.environ.get('KIMI_CODE_HOME')
-    return (Path(home) if home else Path.home() / '.kimi-code') / 'themes'
+    return kimi_home() / 'themes'
+
+
+def tui_config() -> Path:
+    """`tui.toml`, which is where the *chosen* theme lives.
+
+    Not `config.toml`: Kimi splits its settings in two, and the file says so
+    itself — "Terminal UI preferences for kimi-code. Agent/runtime settings
+    stay in ~/.kimi-code/config.toml". The theme is a UI preference, so a
+    menu that only ever looked at `config.toml` could edit every palette and
+    never tell you which one was in use.
+    """
+    return kimi_home() / 'tui.toml'
+
+
+def active_theme() -> str:
+    """The theme Kimi is set to use: a name, or `auto` / `dark` / `light`."""
+    try:
+        text = tui_config().read_text()
+    except OSError:
+        return 'auto'
+    hit = re.search(r'^\s*theme\s*=\s*"([^"]*)"', text, re.M)
+    return hit.group(1) if hit else 'auto'
+
+
+def set_active_theme(name: str) -> str:
+    """Point `tui.toml` at a theme. Returns '' or the reason it was not done.
+
+    The line is replaced where it stands and the rest of the file is left
+    alone, for the same reason the config editor does it that way: this is a
+    file the user owns, with their comments in it.
+    """
+    path = tui_config()
+    try:
+        text = path.read_text()
+    except OSError:
+        text = ''
+    line = f'theme = "{name}"'
+    quoted = re.compile(r'^(\s*theme\s*=\s*)"[^"]*"', re.M)
+    if quoted.search(text):
+        # Only the value inside the quotes. Kimi's own file ends that line
+        # with `# "auto" | "dark" | "light" | custom theme name`, and
+        # replacing the whole line would take the note with it.
+        text = quoted.sub(lambda hit: f'{hit.group(1)}"{name}"', text, count=1)
+    elif re.search(r'^\s*theme\s*=', text, re.M):
+        text = re.sub(r'^\s*theme\s*=.*$', line, text, count=1, flags=re.M)
+    else:
+        header = ('# ~/.kimi-code/tui.toml\n'
+                  '# Terminal UI preferences for kimi-code.\n\n') if not text else ''
+        text = header + text + ('\n' if text and not text.endswith('\n') else '') + line + '\n'
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    except OSError as e:
+        return str(e)
+    return ''
 
 
 def list_themes(directory: Path | None = None) -> list[str]:
@@ -195,44 +254,64 @@ def tint(text: str, hex_value: str) -> str:
 PREVIEW_WIDTH = 40
 
 
-def preview(palette: dict) -> list[str]:
+def preview(palette: dict, highlight: str = '') -> list[str]:
     """A mock Kimi transcript in `palette`, as lines ready to be drawn.
 
-    The names on the left of each pair are the tokens, so the preview doubles
-    as the answer to "which one is that": find the thing you want to change on
-    screen, and the row that changes it is the token drawing it here.
+    Find the thing you want to change on screen, and the row that changes it
+    is the token drawing it here. `highlight` names the token being edited, so
+    the preview can say which of its lines is the one to watch — with
+    nineteen tokens and a dozen lines, "it changed somewhere" is not an
+    answer.
     """
     def c(token: str) -> str:
         return palette.get(token, '#888888')
 
+    # Each line is paired with the tokens that draw it, so the picker can mark
+    # the one being edited. Every token in TOKENS appears at least once — a
+    # palette entry with nothing to point at is one you have to change blind.
     w = PREVIEW_WIDTH
     body = [
-        ('', tint('🌕 Kimi Code 0.36.0', c('primary'))),
-        ('', tint('   ~/.kimi-code-mods', c('textMuted'))),
+        ('primary', tint('🌕 Kimi Code 0.36.0', c('primary'))),
+        ('textMuted', tint('   ~/.kimi-code-mods', c('textMuted'))),
         ('', ''),
-        ('', tint('> ', c('roleUser')) + tint('list the dir', c('roleUser'))),
-        ('', tint('! ls -la', c('shellMode'))),
+        ('roleUser', tint('> list the dir', c('roleUser'))),
+        ('shellMode', tint('! ls -la', c('shellMode'))),
+        ('borderFocus', tint('╭ composer, focused ─────╮', c('borderFocus'))),
         ('', ''),
-        ('', tint('● Read', c('accent')) + tint('(config.toml)', c('text'))),
-        ('', tint(' ⎿ 42 lines', c('textDim'))),
-        ('', tint('  1 - reserved_context_size = 50000', c('diffRemoved'))),
-        ('', tint('  2 + reserved_context_size = 80000', c('diffAdded'))),
-        ('', tint('  @@ config.toml', c('diffMeta'))),
+        ('accent text', tint('● Read', c('accent')) + tint('(config.toml)', c('text'))),
+        ('textDim', tint(' ⎿ 42 lines', c('textDim'))),
+        ('diffGutter diffRemoved diffRemovedStrong',
+         tint('  1 ', c('diffGutter')) + tint('- reserved_context_size = ', c('diffRemoved'))
+         + tint('50000', c('diffRemovedStrong'))),
+        ('diffGutter diffAdded diffAddedStrong',
+         tint('  2 ', c('diffGutter')) + tint('+ reserved_context_size = ', c('diffAdded'))
+         + tint('80000', c('diffAddedStrong'))),
+        ('diffMeta', tint('  @@ config.toml', c('diffMeta'))),
         ('', ''),
-        ('', tint('✻ Thinking… (esc to interrupt)', c('textDim'))),
-        ('', tint('✓ done', c('success')) + '  '
-             + tint('⚠ careful', c('warning')) + '  '
-             + tint('✗ failed', c('error'))),
-        ('', tint('The directory holds 123 files.', c('textStrong'))),
+        ('textDim', tint('✻ Thinking… (esc to interrupt)', c('textDim'))),
+        ('success warning error',
+         tint('✓ done', c('success')) + '  '
+         + tint('⚠ careful', c('warning')) + '  '
+         + tint('✗ failed', c('error'))),
+        ('textStrong', tint('The directory holds 123 files.', c('textStrong'))),
     ]
+    # The frame itself is `border`, so it is listed as a line of its own —
+    # otherwise the one token that surrounds everything is the one with
+    # nothing pointing at it.
+    body.insert(0, ('border', ''))
     top = tint('┌' + '─' * w + '┐', c('border'))
     bottom = tint('└' + '─' * w + '┘', c('border'))
     edge = tint('│', c('border'))
     out = ['', ' Preview', '', top]
-    for _, line in body:
+    for owner, line in body:
         pad = ' ' * max(0, w - 1 - m.visible(line))
-        out.append(f'{edge} {line}{pad}{edge}')
+        mark = '◀' if (highlight and owner and highlight in owner) else ' '
+        out.append(f'{edge} {line}{pad}{edge}{mark}')
     out.append(bottom)
+    if highlight:
+        drawn = any(highlight in owner for owner, _ in body if owner)
+        out += ['', f'  ◀ marks what {highlight} draws' if drawn else
+                f'  {highlight} draws nothing in this preview']
     return out
 
 
@@ -296,9 +375,23 @@ def screen_tokens(st: ThemeState) -> m.Screen:
         if item.key.startswith('tok:'):
             token = item.key[4:]
             current = effective(s.theme).get(token, '')
-            raw = (_ask(token, current,
-                        hint='Six-digit hex, #RRGGBB. Anything else Kimi drops '
-                             'without a word.') or '').strip()
+
+            # The picker rather than a field. Six hex digits are a description
+            # of a colour and not the colour itself; the difficult part is
+            # getting from the one you can picture to those digits, and three
+            # bars drawn in the colours they select turn that back into
+            # looking at something. The preview follows the bars, so the
+            # question being answered is "does this look right" rather than
+            # "is this the number I meant".
+            def with_token(hex_value: str) -> list[str]:
+                trial = dict(s.theme)
+                trial['colors'] = dict(s.theme.get('colors', {}))
+                trial['colors'][token] = hex_value
+                return preview(effective(trial), token)
+
+            raw = m.color(f'{token} — {dict(TOKENS).get(token, "")}', current,
+                          hint='Kimi accepts #RRGGBB only.',
+                          preview=with_token)
             if not raw:
                 return True
             why = valid_color(raw)
@@ -331,11 +424,14 @@ def screen_themes(st: ThemeState) -> m.Screen:
         if s.message:
             rows.append(Item('info', s.message))
         rows.append(Item('sep'))
+        in_use = active_theme()
         for n in names:
             t = read_theme(n, s.dir)
             rows.append(Item('action', n,
-                             (lambda th: lambda x: f'{len(th.get("colors", {}))} '
-                                                   f'token(s) over {th.get("base", "dark")}')(t),
+                             (lambda th, mine: lambda x:
+                              f'{len(th.get("colors", {}))} token(s) over '
+                              f'{th.get("base", "dark")}'
+                              + ('   ← in use' if mine else ''))(t, n == in_use),
                              key=f'edit:{n}', on_delete=delete,
                              help='enter edits it, backspace deletes the file'))
         if not names:
@@ -343,6 +439,10 @@ def screen_themes(st: ThemeState) -> m.Screen:
         rows += [Item('sep'),
                  Item('action', 'New theme', lambda x: '', key='new',
                       help='Starts from a built-in palette; you override what you want.'),
+                 Item('action', 'Theme in use',
+                      lambda x: in_use, key='use',
+                      help='What tui.toml is set to. Kimi reads it at the next '
+                           'start; /theme changes it for a running session.'),
                  Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -365,6 +465,21 @@ def screen_themes(st: ThemeState) -> m.Screen:
             write_theme({'name': name, 'base': 'dark', 'colors': {}}, s.dir)
             s.message = f'created {name}.json'
             return True
+        if item.key == 'use':
+            # `auto`, `dark` and `light` are Kimi's own and always available;
+            # everything else has to be a theme that exists, or Kimi falls
+            # back without saying so.
+            choice = m.pick('Theme in use',
+                            ['auto', 'dark', 'light'] + list_themes(s.dir),
+                            hint='Written to tui.toml. Kimi reads it at the next '
+                                 'start.',
+                            note=lambda n: 'Kimi\'s own' if n in
+                            ('auto', 'dark', 'light') else 'yours')
+            if choice:
+                why = set_active_theme(choice)
+                s.message = f'not written — {why}' if why else \
+                    f'tui.toml now says {choice}'
+            return True
         if item.key.startswith('edit:'):
             inner = ThemeState(s.dir, item.key[5:])
             m.loop(screen_tokens(inner), inner)
@@ -385,6 +500,138 @@ def screen_themes(st: ThemeState) -> m.Screen:
                     aside=lambda s: preview(effective(
                         read_theme(_hovered(s), s.dir))) if list_themes(s.dir) else [],
                     help_line=m.HELP_DEL, title='Themes')
+
+
+def editable_theme(directory: Path | None = None) -> tuple[str, str]:
+    """The theme a colour change would land in, and why there might not be one.
+
+    Kimi's own three cannot be edited — they are compiled in, and a file
+    called `dark.json` is filtered out of its picker anyway. So a colour
+    changed from anywhere else in tweakkimi needs a theme of your own that is
+    also the one in use, and when there is not one the honest answer is to say
+    so and offer to make it.
+    """
+    name = active_theme()
+    if name in RESERVED:
+        return '', f'Kimi is set to "{name}", which is built in and cannot be edited'
+    if name not in list_themes(directory):
+        return '', f'tui.toml names "{name}", but there is no such theme file'
+    return name, ''
+
+
+def screen_colors(tokens: list[str], title: str,
+                  directory: Path | None = None) -> m.Screen:
+    """A few palette tokens, reachable from the screen they affect.
+
+    Every colour in Kimi comes from the palette, so "what colour is my own
+    message" and "what colour is the composer frame" are questions about a
+    theme token. Rather than answer them twice — once here, once in the theme
+    editor — this is the theme editor, narrowed to the tokens that matter for
+    the screen you came from.
+    """
+    directory = directory or themes_dir()
+    state = ThemeState(directory)
+
+    def build(s: ThemeState) -> list[Item]:
+        name, why = editable_theme(directory)
+        rows = [Item('info', 'These are palette tokens: the same values the '
+                             'theme editor writes.')]
+        if why:
+            rows.append(Item('info', why))
+        if s.message:
+            rows.append(Item('info', s.message))
+        rows.append(Item('sep'))
+        if not name:
+            rows += [Item('action', 'Make a theme and use it', lambda x: '',
+                          key='create',
+                          help='Copies nothing — a new theme overrides only what '
+                               'you change, over dark or light.'),
+                     Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+            return rows
+
+        theme = read_theme(name, directory)
+        palette = effective(theme)
+        overrides = theme.get('colors', {})
+        rows.append(Item('info', f'editing "{name}"'))
+        for token in tokens:
+            value = palette.get(token, '')
+            rows.append(Item(
+                'action', token,
+                (lambda v, own: lambda x:
+                 f'{swatch(v)} {v}{"" if own else "   (base)"}')(value, token in overrides),
+                key=f'tok:{token}', on_delete=clear,
+                help=dict(TOKENS).get(token, '') + '   (backspace restores the base)'))
+        rows += [Item('sep'), Item('action', 'Open the whole palette', lambda x: '',
+                                   key='all'),
+                 Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def clear(s: ThemeState, item: Item) -> None:
+        name, _ = editable_theme(directory)
+        if not name:
+            return
+        theme = read_theme(name, directory)
+        theme.get('colors', {}).pop(item.key[4:], None)
+        write_theme(theme, directory)
+        s.message = f'{item.key[4:]} back to the base palette'
+
+    def act(s: ThemeState, item: Item) -> bool:
+        s.message = ''
+        if item.key == 'back':
+            return False
+        if item.key == 'create':
+            name = (_ask('Theme name',
+                         hint='Letters, digits, dot, dash or underscore. It will '
+                              'be written to tui.toml as the one in use.') or '').strip()
+            why = valid_name(name)
+            if why:
+                s.message = f'not created — {why}'
+                return True
+            if not (directory / f'{name}.json').exists():
+                write_theme({'name': name, 'base': 'dark', 'colors': {}}, directory)
+            problem = set_active_theme(name)
+            s.message = f'created, but tui.toml not written — {problem}' if problem \
+                else f'created {name} and set it as the theme in use'
+            return True
+        if item.key == 'all':
+            name, _ = editable_theme(directory)
+            if name:
+                inner = ThemeState(directory, name)
+                m.loop(screen_tokens(inner), inner)
+            return True
+        if item.key.startswith('tok:'):
+            name, _ = editable_theme(directory)
+            if not name:
+                return True
+            token = item.key[4:]
+            theme = read_theme(name, directory)
+
+            def with_token(hex_value: str) -> list[str]:
+                trial = dict(theme)
+                trial['colors'] = dict(theme.get('colors', {}))
+                trial['colors'][token] = hex_value
+                return preview(effective(trial), token)
+
+            raw = m.color(f'{token} — {dict(TOKENS).get(token, "")}',
+                          effective(theme).get(token, ''),
+                          hint='Kimi accepts #RRGGBB only.', preview=with_token)
+            if not raw:
+                return True
+            why = valid_color(raw)
+            if why:
+                s.message = f'not written — {why}'
+                return True
+            theme.setdefault('colors', {})[token] = raw
+            write_theme(theme, directory)
+            s.message = f'{token} = {raw}'
+        return True
+
+    def aside(s: ThemeState) -> list[str]:
+        name, _ = editable_theme(directory)
+        return preview(effective(read_theme(name, directory))) if name else []
+
+    return m.Screen(build, activate=act, reload=lambda s: s, aside=aside,
+                    help_line=m.HELP_DEL, title=title), state
 
 
 def _hovered(s: ThemeState) -> str:
@@ -421,6 +668,11 @@ def _selfcheck() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         d = Path(td) / 'themes'
+        # `tui.toml` is found through KIMI_CODE_HOME, the same variable that
+        # moves the theme directory, so the checks below have a home of their
+        # own rather than writing into the real one.
+        was_home = os.environ.get('KIMI_CODE_HOME')
+        os.environ['KIMI_CODE_HOME'] = td
 
         check('no themes in an empty directory', list_themes(d) == [])
 
@@ -493,6 +745,102 @@ def _selfcheck() -> int:
                 check(f'{label}: mapped line holds its row',
                       rows[ri].label in lines[line_no], lines[line_no])
 
+        # -- the theme in use ------------------------------------------------
+        # It lives in tui.toml, not config.toml — Kimi splits its settings and
+        # says so in the file it writes. A menu looking only at config.toml
+        # could edit every palette and never know which one was in use.
+        cfg = Path(td) / 'tui.toml'
+        cfg.unlink(missing_ok=True)
+        check('no tui.toml reads as auto', active_theme() == 'auto', active_theme())
+
+        cfg.write_text('# mine\ntheme = "midnight"\nrender_latex = true\n')
+        check('the theme in use is read', active_theme() == 'midnight', active_theme())
+
+        check('setting it writes cleanly', set_active_theme('sunset') == '')
+        check('and the theme in use follows', active_theme() == 'sunset')
+        kept = cfg.read_text()
+        check('the rest of the file survives',
+              '# mine' in kept and 'render_latex = true' in kept, kept)
+        check('and the key is not duplicated', kept.count('theme =') == 1, kept)
+
+        # Kimi's own file explains the allowed values in a comment on that
+        # very line. Replacing the whole line would take the note with it.
+        cfg.write_text('theme = "auto" # "auto" | "dark" | "light" | custom\n'
+                       '[editor]\ncommand = ""\n')
+        set_active_theme('midnight')
+        after = cfg.read_text()
+        check('the note after the value is kept',
+              '# "auto" | "dark" | "light" | custom' in after, after)
+        check('and the value did change', active_theme() == 'midnight', after)
+        check('the sections below are untouched', '[editor]' in after, after)
+
+        cfg.unlink()
+        check('a missing file is created with a header',
+              set_active_theme('midnight') == '' and 'tui.toml' in cfg.read_text(),
+              cfg.read_text())
+        check('and reads back', active_theme() == 'midnight')
+
+        # -- colours reached from another screen ------------------------------
+        # Kimi's own three cannot be edited, so a colour changed from anywhere
+        # else needs a theme of your own that is also the one in use.
+        set_active_theme('dark')
+        name, why = editable_theme(d)
+        check('a built-in theme is not editable', name == '' and 'built in' in why, why)
+        set_active_theme('nothing-like-this')
+        name, why = editable_theme(d)
+        check('a theme with no file is not editable',
+              name == '' and 'no such theme' in why, why)
+        set_active_theme('midnight')
+        name, why = editable_theme(d)
+        check('a theme of your own that is in use is editable',
+              name == 'midnight' and why == '', (name, why))
+
+        narrow, nstate = screen_colors(['roleUser'], 'Your message colour', d)
+        nrows = narrow.build(nstate)
+        check('the narrowed screen offers the token asked for',
+              any(r.key == 'tok:roleUser' for r in nrows), [r.key for r in nrows])
+        check('and no others',
+              len([r for r in nrows if r.key.startswith('tok:')]) == 1)
+        check('it can open the whole palette from there',
+              any(r.key == 'all' for r in nrows))
+        check('and it previews the theme it is editing',
+              any('Preview' in l for l in narrow.aside(nstate)))
+
+        # With nothing editable it says why, and offers the way out rather
+        # than a row that would silently do nothing.
+        set_active_theme('dark')
+        rows_none = narrow.build(nstate)
+        check('with a built-in theme in use there is nothing to edit',
+              not any(r.key.startswith('tok:') for r in rows_none))
+        check('and it offers to make one',
+              any(r.key == 'create' for r in rows_none), [r.key for r in rows_none])
+        set_active_theme('midnight')
+
+        # Every token has to draw something in the preview, or it is one you
+        # can only change blind — pick a colour, look, and see nothing move.
+        import re as _re
+        src = Path(__file__).read_text()
+        seg = src[src.index('body = ['):src.index('    ]', src.index('body = ['))]
+        owners = set()
+        for hit in _re.finditer(r"\('([a-zA-Z ]*)',", seg):
+            owners |= set(hit.group(1).split())
+        owners.add('border')                       # the frame around it all
+        names = {t for t, _ in TOKENS}
+        check('every token draws something in the preview',
+              names <= owners, sorted(names - owners))
+        check('the preview names no token that does not exist',
+              owners <= names | {'border'}, sorted(owners - names))
+
+        # And the preview marks the one being edited, so "it changed
+        # somewhere" is not the answer to a nudge on a bar.
+        marked = preview(BUILT_IN['dark'], 'roleUser')
+        check('the edited token is marked', any('◀' in l for l in marked))
+        check('and named under the frame',
+              any('roleUser' in l for l in marked), marked[-2:])
+        plain = preview(BUILT_IN['dark'])
+        check('with nothing to mark, nothing is marked',
+              not any('◀' in l for l in plain))
+
         # Backspace on a token row clears the override and writes the file;
         # ‹›, which used to do it, leaves the colour alone.
         inner = ThemeState(d, 'midnight')
@@ -514,6 +862,11 @@ def _selfcheck() -> int:
         check('the base cycles and is written',
               read_theme('midnight', d)['base'] == 'dark',
               read_theme('midnight', d)['base'])
+
+    if was_home is None:
+        os.environ.pop('KIMI_CODE_HOME', None)
+    else:
+        os.environ['KIMI_CODE_HOME'] = was_home
 
     print(f'theme-menu selfcheck: ok ({ok} checks)')
     return 0
