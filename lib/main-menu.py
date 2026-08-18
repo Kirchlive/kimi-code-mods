@@ -1103,6 +1103,30 @@ STYLE_SGR = {'default': '\x1b[1m', 'plain': '', 'italic': '\x1b[3m',
              'strikethrough': '\x1b[9m'}
 
 
+# What Kimi puts in front of your own messages when nothing says otherwise.
+# The trailing space is part of it, which is why the patch adds one to any
+# marker that does not already end in one.
+KIMI_MARKER = '✨'
+
+
+def marker_value(st: State) -> str:
+    """The marker itself, rather than the word `default`.
+
+    A row that reads `default` answers the wrong question: what you want to
+    know is which character will be sitting in front of your messages, and
+    for that there is no substitute for showing it. The two words that are
+    not characters — `default` and `none` — are shown as what they produce,
+    with the word kept alongside so the value in the file is still readable
+    from the row.
+    """
+    raw = str(st.settings.get('user_message_marker', 'default'))
+    if raw in ('', 'default'):
+        return f'{KIMI_MARKER}   (default)'
+    if raw == 'none':
+        return '—   (none)'
+    return raw
+
+
 def user_message_preview(st: State, sel=None) -> list[str]:
     """Your own message drawn twice: as Kimi does it, and as you asked for it."""
     marker = st.settings.get('user_message_marker', 'default')
@@ -1110,13 +1134,14 @@ def user_message_preview(st: State, sel=None) -> list[str]:
     style = st.settings.get('user_message_style', 'default')
 
     text = 'list the dir'
-    prefix = '✨ ' if marker in ('default', '') else ('' if marker == 'none' else
-                                                     (marker if marker.endswith(' ')
-                                                      else marker + ' '))
+    prefix = KIMI_MARKER + ' ' if marker in ('default', '') else \
+        ('' if marker == 'none' else
+         (marker if marker.endswith(' ') else marker + ' '))
     sgr = STYLE_SGR.get(style, '')
     body = f'{prefix}{sgr}{text}\x1b[0m' if sgr else f'{prefix}{text}'
 
-    out = ['', ' Preview', '', '  Kimi\'s own:', '', '    ✨ \x1b[1m' + text + '\x1b[0m',
+    out = ['', ' Preview', '', '  Kimi\'s own:', '',
+           f'    {KIMI_MARKER} \x1b[1m{text}\x1b[0m',
            '', '  Yours:', '']
     if border == 'off':
         out.append('    ' + body)
@@ -1146,7 +1171,7 @@ def screen_user_message(st: State) -> m.Screen:
                 Item('sep')]
         for key in keys:
             label, help_text, _ = PATCH_HELP[key]
-            value = switch_value(key)
+            value = marker_value if key == 'user_message_marker' else switch_value(key)
             if key in ps.CHOICES:
                 rows.append(Item('cycle', label, value, note, key=key,
                                  choices=ps.CHOICES[key], help=help_text))
@@ -1795,6 +1820,25 @@ def _selfcheck() -> int:
         pv = '\n'.join(user_message_preview(state()))
         check('the message preview draws the chosen frame', '╔' in pv and '╚' in pv, pv)
         check('and still shows what Kimi does', 'Kimi\'s own' in pv)
+        # The marker row shows the character rather than the word: what you
+        # want to know is what will be sitting in front of your messages.
+        ps.set_value('user_message_marker', 'default', settings)
+        check('the marker row shows Kimi\'s own character',
+              marker_value(state()).startswith(KIMI_MARKER), marker_value(state()))
+        check('and still names the value in the file',
+              '(default)' in marker_value(state()))
+        ps.set_value('user_message_marker', 'none', settings)
+        check('`none` is shown as the absence it is',
+              marker_value(state()).startswith('—'), marker_value(state()))
+        for own in ('▌', '🌕', '>>'):
+            ps.set_value('user_message_marker', own, settings)
+            check(f'a marker of your own is shown as itself ({own})',
+                  marker_value(state()) == own, marker_value(state()))
+        row = next(r for r in screen_user_message(state()).build(state())
+                   if r.key == 'user_message_marker')
+        check('and that is what the row draws', row.value(state()) == '>>',
+              row.value(state()))
+
         ps.set_value('user_message_border', 'off', settings)
         ps.set_value('user_message_marker', '▌', settings)
         pv2 = '\n'.join(user_message_preview(state()))
