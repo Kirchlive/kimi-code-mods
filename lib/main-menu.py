@@ -310,13 +310,17 @@ def build_items(st: State) -> list[Item]:
         keys = SETTING_GROUPS[group][1]
         return lambda s: group_value(s, keys)
 
-    def group_note(group: str):
-        """Whether the patch behind a group has reached the binary yet."""
-        needles = {PATCH_HELP[k][2] for k in SETTING_GROUPS[group][1]}
+    def group_note(group: str, value_fn=None):
+        """`default` for an untouched group, otherwise whether it is live yet."""
+        keys = SETTING_GROUPS[group][1]
+        needles = {PATCH_HELP[k][2] for k in keys}
         patches = [st.patch_file(n) for n in sorted(needles)]
         if any(p is None for p in patches):
-            return lambda s: 'patch not installed'
-        return lambda s: next((n for n in (s.feature_note(p) for p in patches) if n), '')
+            live = lambda s: 'patch not installed'                    # noqa: E731
+        else:
+            live = lambda s: next(                                     # noqa: E731
+                (n for n in (s.feature_note(p) for p in patches) if n), '')
+        return value_note(value_fn or switches(group), at_default(*keys), live)
 
     # The order is tweakcc's, so that muscle memory carries over from it: the
     # appearance settings first, then the model and routing ones, then Kimi's
@@ -334,13 +338,13 @@ def build_items(st: State) -> list[Item]:
         # off their default: "on, 16 words" is the answer to the question the
         # row raises, and "2 changed" is not.
         Item('submenu', 'Thinking verbs',
-             lambda s: ('off' if s.settings.get('thinking_verbs') != 'on'
-                        else f'on, {len(verb_words(s))} words'),
-             group_note('verbs'), key='verbs',
+             verbs_row := (lambda s: ('off' if s.settings.get('thinking_verbs') != 'on'
+                                      else f'on, {len(verb_words(s))} words')),
+             group_note('verbs', verbs_row), key='verbs',
              help='Rotate the word beside the spinner instead of always saying "working".'),
         Item('submenu', 'Thinking style',
-             lambda s: str(s.settings.get('spinner_style', 'default')),
-             group_note('style'), key='style',
+             style_row := (lambda s: str(s.settings.get('spinner_style', 'default'))),
+             group_note('style', style_row), key='style',
              help='The characters the working indicator cycles through, and how fast.'),
         Item('submenu', 'User message display', switches('usermsg'), group_note('usermsg'),
              key='usermsg',
@@ -784,6 +788,37 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
 BOX = {'on': '☑ Enabled', 'off': '☐ Disabled'}
 
 
+def default_note(value_text) -> str:
+    """`default` beside a value, unless the value already says so.
+
+    A row reading `default   [default]` says one thing twice, which is worse
+    than either half on its own — it reads as though the two were different
+    facts.
+    """
+    return '' if 'default' in str(value_text).lower() else 'default'
+
+
+def value_note(value_fn, at_default_fn, live_note_fn):
+    """The note beside a value: `default` when untouched, otherwise why it is
+    not in effect yet.
+
+    `waiting for apply` was shown for every patch-backed row, including the
+    ones sitting at their default — where there is nothing to apply, because
+    the patch is a no-op at that value. So the note said "something is
+    pending" about rows where nothing was, and the rows where something
+    genuinely was pending did not stand out from them.
+    """
+    def read(st):
+        return default_note(value_fn(st)) if at_default_fn(st) else live_note_fn(st)
+    return read
+
+
+def at_default(*keys: str):
+    """Whether every one of these switches is still on Kimi's own value."""
+    return lambda st: all(str(st.settings.get(k, ps.DEFAULTS[k]))
+                          == str(ps.DEFAULTS[k]) for k in keys)
+
+
 def switch_value(key: str):
     """The value cell for one switch, as a checkbox where that is truthful."""
     two_state = set(ps.CHOICES.get(key) or []) == {'on', 'off'}
@@ -808,7 +843,8 @@ def screen_settings(st: State, group: str) -> m.Screen:
                       'No description registered in PATCH_HELP yet.', key.split('_')[0]))
             patch = s.patch_file(needle)
             value = switch_value(key)
-            note = (lambda q: lambda x: x.feature_note(q))(patch)
+            note = value_note(value, at_default(key),
+                              (lambda q: lambda x: x.feature_note(q))(patch))
             if key in ps.CHOICES:
                 rows.append(Item('cycle', label, value, note,
                                  key=key, choices=ps.CHOICES[key], help=help_text))
@@ -833,15 +869,19 @@ def screen_settings(st: State, group: str) -> m.Screen:
                                      'patch — no patch run needed'))
             data = config_summary(s)
             perm = data.get(cfg.K_PERMISSION)
+            # The note says `default` where the key is absent, and the help
+            # line below carries what the chosen mode means — putting the
+            # explanation in the note as well would crowd out the one word
+            # that says whether anything was changed.
             rows.append(Item('cycle', 'Default permission mode',
                              lambda x: str(perm) if perm else 'manual',
-                             lambda x: (cfg.PERMISSION_HELP.get(perm or 'manual', '')
-                                        + ('' if perm else ', Kimi\'s own')),
+                             lambda x: '' if perm else 'default',
                              key='permission', choices=cfg.PERMISSION_MODES,
                              on_delete=drop_permission,
-                             help='What Kimi does before it runs a tool call. '
-                                  'Read at the next start; backspace hands it '
-                                  'back to Kimi.'))
+                             help='What Kimi does before it runs a tool call: '
+                                  + cfg.PERMISSION_HELP.get(perm or 'manual', '')
+                                  + '. Read at the next start; backspace hands '
+                                    'it back to Kimi.'))
             rows.append(Item('submenu', 'Composer frame colours',
                              lambda x: 'border, borderFocus',
                              key='colors:border,borderFocus',
@@ -851,7 +891,9 @@ def screen_settings(st: State, group: str) -> m.Screen:
                              lambda x: 'always' if env_value(
                                  x.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1'
                              else 'default',
-                             lambda x: 'applied by bin/kimi, no patch run',
+                             lambda x: '' if env_value(
+                                 x.root, 'KIMI_CODE_TUI_FULL_SCREEN') != '1'
+                             else 'applied by bin/kimi, no patch run',
                              key='fullscreen', choices=['default', 'always'],
                              help='Run Kimi in the alternate screen buffer.'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
@@ -988,10 +1030,12 @@ def screen_thinking_style(st: State) -> m.Screen:
     something you recognise on sight and not otherwise.
     """
     presets = patch_table(st.patch_file('spinner'), 'PRESETS')
+    keys = SETTING_GROUPS['style'][1]
 
     def build(s: State) -> list[Item]:
         current = s.settings.get('spinner_style', 'default')
-        note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('spinner'))
+        note = value_note(lambda x: current, at_default(*keys),
+                          (lambda q: lambda x: x.feature_note(q))(s.patch_file('spinner')))
         rows = [Item('info', 'read while the patches are applied — '
                              'a change here needs a patch run'),
                 Item('sep')]
@@ -1087,12 +1131,13 @@ def screen_thinking_verbs(st: State) -> m.Screen:
     """The words beside the spinner: whether they rotate, which ones, and how."""
 
     def build(s: State) -> list[Item]:
-        note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('verbs'))
+        rotate = lambda x: BOX.get(x.settings.get('thinking_verbs', 'off'), '?')  # noqa: E731
+        note = value_note(rotate, at_default(*SETTING_GROUPS['verbs'][1]),
+                          (lambda q: lambda x: x.feature_note(q))(s.patch_file('verbs')))
         rows = [Item('info', 'read while the patches are applied — '
                              'a change here needs a patch run'),
                 Item('sep'),
-                Item('cycle', 'Rotate the verb',
-                     lambda x: BOX.get(x.settings.get('thinking_verbs', 'off'), '?'),
+                Item('cycle', 'Rotate the verb', rotate,
                      note, key='thinking_verbs', choices=ps.CHOICES['thinking_verbs'],
                      help='Off keeps Kimi\'s two fixed words.'),
                 Item('action', 'Format',
@@ -1197,7 +1242,11 @@ def marker_value(st: State) -> str:
     """
     raw = str(st.settings.get('user_message_marker', 'default'))
     if raw in ('', 'default'):
-        return f'{KIMI_MARKER}   (default)'
+        # No `(default)` here: the note beside the row says that, for every
+        # row, and saying it twice reads as though the two were different
+        # facts. `none` is not the default, so it keeps its word — a dash on
+        # its own is a riddle.
+        return KIMI_MARKER
     if raw == 'none':
         return '—   (none)'
     return raw
@@ -1273,7 +1322,7 @@ def screen_user_message(st: State) -> m.Screen:
     keys = SETTING_GROUPS['usermsg'][1]
 
     def build(s: State) -> list[Item]:
-        note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('user-message'))
+        live = (lambda q: lambda x: x.feature_note(q))(s.patch_file('user-message'))
         rows = [Item('info', 'read while the patches are applied — '
                              'a change here needs a patch run'),
                 Item('info', 'the colour is the `roleUser` token in your theme, '
@@ -1282,6 +1331,7 @@ def screen_user_message(st: State) -> m.Screen:
         for key in keys:
             label, help_text, _ = PATCH_HELP[key]
             value = marker_value if key == 'user_message_marker' else switch_value(key)
+            note = value_note(value, at_default(key), live)
             if key in ps.CHOICES:
                 rows.append(Item('cycle', label, value, note, key=key,
                                  choices=ps.CHOICES[key], help=help_text))
@@ -1706,10 +1756,27 @@ def _selfcheck() -> int:
         check('a home path is shortened', tilde(Path.home() / 'x') == '~/x', tilde(Path.home()))
         check('a path outside home is left alone', tilde(Path('/tmp/x')) == '/tmp/x')
         check('cycle rows show arrows', '‹›' in out)
-        sw = '\n'.join(m.render(screen_settings(st, 'misc'), st,
-                                 screen_settings(st, 'misc').build(st), 0))
-        check('patch note shown for a switch with no patch',
-              'patch not installed' in sw, sw[:600])
+        # A row sitting at its default has nothing pending, so it says
+        # `default`. The patch behind it only becomes worth mentioning once
+        # the value differs — before that, whether the patch is installed
+        # changes nothing about what Kimi does.
+        settings.write_text('')
+        misc0 = screen_settings(state(), 'misc')
+        sw = '\n'.join(m.render(misc0, state(), misc0.build(state()), 0))
+        check('an untouched switch says default rather than waiting',
+              '[default]' in sw and 'waiting for apply' not in sw, sw[:700])
+        check('and a switch whose value already reads default says it once',
+              'default   [default]' not in sw, sw[:700])
+
+        # `expanded_by_default` has no patch in this sandbox, so once it is
+        # moved off its default there is something worth saying about it.
+        ps.set_value('expanded_by_default', 'both', settings)
+        misc1 = screen_settings(state(), 'misc')
+        sw = '\n'.join(m.render(misc1, state(), misc1.build(state()), 0))
+        check('a changed switch reports its patch instead',
+              'patch not installed' in sw, sw[:700])
+        check('and the untouched ones still say default', '[default]' in sw, sw[:700])
+        settings.write_text('')
 
         # -- key decoding end to end --------------------------------------
         src = FakeKeys(['down', 'down', 'up', 'enter', 'q'])
@@ -1921,6 +1988,37 @@ def _selfcheck() -> int:
             b.unlink()
         config.write_text('default_model = "kimi-code/k3"\n')
 
+        # -- no row says `default` twice ------------------------------------
+        # The note carries that word for every row, so a value that already
+        # contains it must not have it appended: `default   [default]` reads
+        # as two facts rather than one said twice.
+        settings.write_text('')
+        config.write_text('default_model = "kimi-code/k3"\n')
+        # Compared on the value and the note rather than on the rendered
+        # line: two labels contain the word themselves — `Expanded by
+        # default`, `Default permission mode` — and those are not repetition.
+        doubled = []
+        for maker in (lambda: (screen_settings(state(), 'misc'), state()),
+                      lambda: (screen_settings(state(), 'router'), state()),
+                      lambda: (screen_settings(state(), 'agentsmd'), state()),
+                      lambda: (screen_user_message(state()), state()),
+                      lambda: (screen_thinking_style(state()), state()),
+                      lambda: (screen_thinking_verbs(state()), state()),
+                      lambda: (SCREEN, state())):
+            screen, here = maker()
+            rows_here = build_items(here) if screen is SCREEN else screen.build(here)
+            for it in rows_here:
+                if not it.selectable:
+                    continue
+                shown, aside_note = str(it.value(here)).lower(), str(it.note(here)).lower()
+                if 'default' in shown and 'default' in aside_note:
+                    doubled.append(f'{it.label}: {shown} [{aside_note}]')
+        check('no row says default twice', not doubled, doubled)
+
+        check('a value that says default gets no note',
+              default_note('default') == '' and default_note('✨   (default)') == '')
+        check('any other value does', default_note('off') == 'default')
+
         # -- the colour rows point at tokens that exist ---------------------
         # A row offering to edit `roleUsr` would open a picker that writes a
         # key Kimi drops without a word. The names are spelled out in five
@@ -2005,8 +2103,10 @@ def _selfcheck() -> int:
         ps.set_value('user_message_marker', 'default', settings)
         check('the marker row shows Kimi\'s own character',
               marker_value(state()).startswith(KIMI_MARKER), marker_value(state()))
-        check('and still names the value in the file',
-              '(default)' in marker_value(state()))
+        check('and does not repeat what the note beside it says',
+              '(default)' not in marker_value(state()), marker_value(state()))
+        check('the note is where default is said',
+              default_note(marker_value(state())) == 'default')
         ps.set_value('user_message_marker', 'none', settings)
         check('`none` is shown as the absence it is',
               marker_value(state()).startswith('—'), marker_value(state()))

@@ -214,6 +214,15 @@ shows it and can change it, and the editor says whether the theme open in
 front of you is the one you will see, because editing any other one changes a
 file and nothing else.
 
+**A row that is untouched says `default`.** Every patch-backed row used to
+read `waiting for apply`, including the ones sitting at Kimi's own value —
+where there is nothing to apply, because the patch is a no-op at that value.
+So the note claimed something was pending about rows where nothing was, and
+the rows where something genuinely was pending did not stand out from them.
+Now `default` marks what has not been changed, `waiting for apply` means it
+has, and a value that already reads `default` is not given the word a second
+time.
+
 **Screens that configure something visual show it.** Themes, the spinner, the
 rotating verb and your own message frame each draw a preview beside the rows —
 tweakcc's second column, and the same reasoning: `glow` and `wave` are names
