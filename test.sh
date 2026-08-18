@@ -21,7 +21,20 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # anything runs, so a file the user edited on purpose is not mistaken for one
 # a test wrote.
 WATCHED='patch-settings.conf toolsets.conf env-profile.conf'
-snapshot() { (cd "$HERE" && git status --porcelain -- $WATCHED 2>/dev/null); }
+
+# Kimi's own files are outside the repository, so git cannot speak for them —
+# and they are the ones where a stray write matters most: a permission mode or
+# a theme changed by a test is a change to how the tool behaves, made by
+# nobody. Hashed instead, which needs no git and no assumptions about what
+# they contain.
+KIMI_FILES="$HOME/.kimi-code/config.toml $HOME/.kimi-code/tui.toml"
+snapshot() {
+  (cd "$HERE" && git status --porcelain -- $WATCHED 2>/dev/null)
+  for f in $KIMI_FILES; do
+    [ -f "$f" ] && shasum -a 256 "$f" 2>/dev/null
+  done
+  true
+}
 BEFORE="$(snapshot)"
 
 ok()   { PASS=$((PASS+1)); echo "  ok   $1"; }
@@ -199,6 +212,7 @@ fi
 
 echo
 echo 'the suite leaves the real settings alone:'
+# Covers the repository's own settings files and Kimi's.
 AFTER="$(snapshot)"
 [ "$AFTER" = "$BEFORE" ]
 check $? 'no check wrote to a settings file outside its sandbox' \

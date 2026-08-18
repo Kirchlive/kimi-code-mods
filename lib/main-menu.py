@@ -30,9 +30,11 @@ import importlib.util
 import io
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -379,10 +381,6 @@ def build_items(st: State) -> list[Item]:
                  data.get(cfg.S_HOOKS) if isinstance(data.get(cfg.S_HOOKS), list) else []),
              key='hooks',
              help='Run a shell command on one of Kimi\'s 20 events.'),
-        Item('submenu', 'Default permission mode',
-             lambda s: str(perm) if perm else 'manual (Kimi default)',
-             key='permission',
-             help='What Kimi does before running a tool call. yolo skips the prompt.'),
         Item('submenu', 'Loop control',
              lambda s: (f"{loop.get(cfg.K_ATTEMPTS, 3)} attempts, "
                         f"{loop.get(cfg.K_RESERVED, 50000)} reserved"),
@@ -510,6 +508,45 @@ def open_file(path: Path) -> None:
         return
     editor = os.environ.get('VISUAL') or os.environ.get('EDITOR')
     subprocess.run([editor, str(path)] if editor else ['open', str(path)])
+
+
+# Paths already backed up in this run. A row that writes on every ‹› would
+# otherwise leave a backup per keystroke, and three presses to walk a list of
+# three is a normal thing to do. One copy per session is the state worth
+# keeping anyway: how the file looked before you started.
+_backed_up: set[Path] = set()
+
+
+def write_config_value(st: State, section: str, key: str, value) -> str:
+    """Set or remove one `config.toml` key, straight away.
+
+    The deliberate omission is `kimi doctor`. It takes about 1.7 seconds, and
+    this is called from rows you step through with an arrow key — three
+    presses would be five seconds of waiting to walk a list of three. What
+    makes that safe is the shape of these particular settings: the value comes
+    from a list taken out of Kimi's own schema rather than from a field, and
+    the line editor touches nothing but that one line. Anything typed still
+    goes through the full path in `config_item`, validator included.
+    """
+    path = st.config_path
+    original = path.read_text() if path.exists() else ''
+    editing = cfg.Editing(path, cfg.TomlLines(original), dry_run=False)
+    if value is None:
+        editing.doc.remove(section, key)
+    else:
+        editing.doc.set(section, key, cfg.lit(value))
+    text = editing.doc.text()
+    if text == original:
+        return ''
+    try:
+        if path.exists() and path not in _backed_up:
+            stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            shutil.copy2(path, path.with_suffix(f'.toml.tweakkimi-{stamp}.bak'))
+            _backed_up.add(path)
+        path.write_text(text)
+    except OSError as e:
+        return str(e)
+    return ''
 
 
 def config_item(st: State, item: str) -> None:
@@ -785,6 +822,26 @@ def screen_settings(st: State, group: str) -> m.Screen:
         # row on this screen the patches do not read: `bin/kimi` exports it,
         # so it takes effect at the next start with no patch run at all.
         if group == 'misc':
+            # Two rows here are not patch switches. Both are settings you
+            # step through rather than doors into a screen, which is what
+            # they have in common with everything else on this list — and
+            # what they did not have in common with the root menu. They go
+            # under a rule of their own, because the line at the top of this
+            # screen does not describe them: neither waits for a patch run.
+            rows.append(Item('sep'))
+            rows.append(Item('info', 'read by Kimi and the launcher, not by a '
+                                     'patch — no patch run needed'))
+            data = config_summary(s)
+            perm = data.get(cfg.K_PERMISSION)
+            rows.append(Item('cycle', 'Default permission mode',
+                             lambda x: str(perm) if perm else 'manual',
+                             lambda x: (cfg.PERMISSION_HELP.get(perm or 'manual', '')
+                                        + ('' if perm else ', Kimi\'s own')),
+                             key='permission', choices=cfg.PERMISSION_MODES,
+                             on_delete=drop_permission,
+                             help='What Kimi does before it runs a tool call. '
+                                  'Read at the next start; backspace hands it '
+                                  'back to Kimi.'))
             rows.append(Item('submenu', 'Composer frame colours',
                              lambda x: 'border, borderFocus',
                              key='colors:border,borderFocus',
@@ -815,9 +872,19 @@ def screen_settings(st: State, group: str) -> m.Screen:
                 ps.set_value(item.key, raw, s.settings_path)
         return True
 
+    def drop_permission(s: State, item: Item) -> None:
+        write_config_value(s, '', cfg.K_PERMISSION, None)
+
     def cyc(s: State, item: Item, forward: bool) -> None:
         if item.key == 'fullscreen':
             cycle_item(s, item, forward)
+        elif item.key == 'permission':
+            modes = cfg.PERMISSION_MODES
+            now = (config_summary(s).get(cfg.K_PERMISSION)
+                   or cfg.KIMI_DEFAULTS[cfg.K_PERMISSION])
+            here = modes.index(now) if now in modes else 0
+            write_config_value(s, '', cfg.K_PERMISSION,
+                               modes[(here + (1 if forward else -1)) % len(modes)])
         else:
             ps.cycle(item.key, forward, s.settings_path)
 
@@ -1372,8 +1439,6 @@ def activate(st: State, item: Item) -> bool:
         config_item(st, '1')
     elif k == 'skills':
         sub(screen_skills(st), st)
-    elif k == 'permission':
-        config_item(st, '5')
     elif k == 'loop':
         config_item(st, '6')
     elif k == 'thinking':
@@ -1586,13 +1651,13 @@ def _selfcheck() -> int:
         rows_by_group = {g: screen_settings(st, g).build(st) for g in SETTING_GROUPS}
         for group, grows in rows_by_group.items():
             keys = SETTING_GROUPS[group][1]
-            # `fullscreen` is the one row on a switch screen that is not a
-            # patch switch: it is a launcher variable that moved here from
-            # the root menu, where it was the only row that changed a value
-            # rather than opening a door.
+            # Two rows on the misc screen are not patch switches: the
+            # fullscreen renderer is a launcher variable and the permission
+            # mode is a config.toml key. Both moved here from the root menu,
+            # where they were rows that changed a value rather than doors.
             check(f'{group}: one row per switch',
                   [r.key for r in grows if r.selectable
-                   and r.key not in ('back', 'fullscreen')
+                   and r.key not in ('back', 'fullscreen', 'permission')
                    and not r.key.startswith('colors:')] == keys,
                   [r.key for r in grows])
             check(f'{group}: every switch row carries help',
@@ -1785,6 +1850,76 @@ def _selfcheck() -> int:
         check('environment screen lists variables', len(env_names) > 5, env_names)
         check('every environment row is a launcher variable',
               all(n.startswith('KIMI') for n in env_names), env_names)
+
+        # -- the rows that write config.toml on a keystroke -----------------
+        # The permission mode is stepped through rather than opened, so it
+        # writes on every press. That is only safe because the value comes
+        # from Kimi's own list and the line editor touches nothing else —
+        # both of which are checked here rather than assumed.
+        config.write_text('# a comment worth keeping\n'
+                          'default_model = "kimi-code/k3"\n'
+                          '[loop_control]\n'
+                          'max_attempts_per_step = 3\n')
+        st = state()
+        misc = screen_settings(st, 'misc')
+        row = next(r for r in misc.build(st) if r.key == 'permission')
+        check('the permission row is a cycle', row.kind == 'cycle', row.kind)
+        check('and offers exactly Kimi\'s own modes',
+              row.choices == cfg.PERMISSION_MODES, row.choices)
+        check('an unset value reads as Kimi\'s default',
+              row.value(st) == 'manual', row.value(st))
+
+        _backed_up.clear()
+        m.handle(misc, st, misc.build(st),
+                 next(i for i, r in enumerate(misc.build(st)) if r.key == 'permission'),
+                 'right')
+        written = config.read_text()
+        check('‹› writes the file',
+              'default_permission_mode' in written, written)
+        check('and the rest of it survives',
+              '# a comment worth keeping' in written
+              and 'max_attempts_per_step = 3' in written, written)
+        import tomllib as _toml
+        first = _toml.loads(written)[cfg.K_PERMISSION]
+        check('the value written is one Kimi accepts',
+              first in cfg.PERMISSION_MODES, first)
+
+        backups = list(root.glob('*.bak'))
+        check('the first write keeps a copy of what was there', len(backups) == 1,
+              [b.name for b in backups])
+        check('and that copy is the original', '# a comment worth keeping'
+              in backups[0].read_text() and 'default_permission_mode'
+              not in backups[0].read_text())
+
+        st = state()
+        misc = screen_settings(st, 'misc')
+        rows_p = misc.build(st)
+        idx_p = next(i for i, r in enumerate(rows_p) if r.key == 'permission')
+        m.handle(misc, st, rows_p, idx_p, 'right')
+        m.handle(misc, st, misc.build(state()), idx_p, 'right')
+        check('stepping again does not pile up backups',
+              len(list(root.glob('*.bak'))) == 1,
+              [b.name for b in root.glob('*.bak')])
+        check('and the mode kept moving',
+              _toml.loads(config.read_text())[cfg.K_PERMISSION] != first,
+              _toml.loads(config.read_text()).get(cfg.K_PERMISSION))
+
+        # Backspace hands it back, which for a config key means removing it
+        # rather than writing Kimi's default into the file.
+        st = state()
+        misc = screen_settings(st, 'misc')
+        rows_p = misc.build(st)
+        m.handle(misc, st, rows_p,
+                 next(i for i, r in enumerate(rows_p) if r.key == 'permission'),
+                 'backspace')
+        check('backspace removes the key',
+              cfg.K_PERMISSION not in _toml.loads(config.read_text()),
+              _toml.loads(config.read_text()))
+        check('and leaves the rest of the file alone',
+              '# a comment worth keeping' in config.read_text())
+        for b in root.glob('*.bak'):
+            b.unlink()
+        config.write_text('default_model = "kimi-code/k3"\n')
 
         # -- the colour rows point at tokens that exist ---------------------
         # A row offering to edit `roleUsr` would open a picker that writes a
