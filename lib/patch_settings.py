@@ -38,7 +38,7 @@ DEFAULTS = {
     'thinking_verbs_format': '{}',    # {} is the word
     'user_message_marker': 'default',  # default, or the prefix itself
     'user_message_border': 'off',     # off | round | single | double | bold | topbottom
-    'user_message_style': 'default',  # default | plain | italic | dim | underline
+    'user_message_style': 'default',  # default | plain | italic | dim | underline | strikethrough
     'input_box_border': 'default',    # default | off | single | double | bold
 }
 
@@ -62,16 +62,17 @@ CHOICES = {
                             '200', '300', '400'],
     'thinking_verbs': ['off', 'on'],
     'user_message_border': ['off', 'round', 'single', 'double', 'bold', 'topbottom'],
-    'user_message_style': ['default', 'plain', 'italic', 'dim', 'underline'],
+    'user_message_style': ['default', 'plain', 'italic', 'dim', 'underline',
+                           'strikethrough'],
     'input_box_border': ['default', 'off', 'single', 'double', 'bold'],
 }
 
-# Two settings take a value no list can hold: a duration in milliseconds and a
-# prefix string. They are registered in DEFAULTS above but deliberately absent
-# here, and the menu reads that absence as "ask for a value" rather than
-# "cycle" — which is why every key belongs in DEFAULTS and only some in
-# CHOICES. A key in neither is invisible to the menu, which is the one state
-# that would be a mistake.
+# Four settings take a value no list can hold: the message marker, your own
+# spinner frames, your own verbs and the format they are drawn in. They are
+# registered in DEFAULTS above but deliberately absent here, and the menu reads
+# that absence as "open a field" rather than "cycle" — which is why every key
+# belongs in DEFAULTS and only some in CHOICES. A key in neither is invisible
+# to the menu, which is the one state that would be a mistake.
 FREE_TEXT = sorted(set(DEFAULTS) - set(CHOICES))
 
 LINE_RE = re.compile(r'^\s*([A-Za-z_][\w.-]*)\s*=\s*(.*?)\s*$')
@@ -118,7 +119,13 @@ def set_value(key: str, value: str, path: Path | None = None) -> None:
             continue
         m = LINE_RE.match(line)
         if m and m.group(1) == key:
-            lines[i] = f'{key}={value}'
+            # Keep the spacing the line already had. Both forms parse the
+            # same, so writing `key=value` over a file that reads `key = value`
+            # changes nothing except how it looks — and this file is meant to
+            # be read and edited by hand, where a line that suddenly loses its
+            # spacing looks like something happened to it.
+            spaced = re.match(r'^\s*[A-Za-z_][\w.-]*(\s+)=', line)
+            lines[i] = f'{key} = {value}' if spaced else f'{key}={value}'
             break
     else:
         if not lines:
@@ -164,6 +171,17 @@ def _selfcheck() -> int:
         assert load(p)['other_thing'] == '42'
         assert load(p)['wd_command'] == 'on'
         assert load(p)['suggestion_height'] == 'half'
+
+        # A line's own spacing survives being written. Both forms parse the
+        # same, so this is only about how the file reads — which matters,
+        # because it is meant to be edited by hand and a line that silently
+        # loses its spacing looks like something happened to it.
+        p.write_text('spaced = one\ntight=two\n')
+        set_value('spaced', 'ONE', p)
+        set_value('tight', 'TWO', p)
+        assert 'spaced = ONE' in p.read_text(), p.read_text()
+        assert 'tight=TWO' in p.read_text(), p.read_text()
+        assert load(p)['spaced'] == 'ONE' and load(p)['tight'] == 'TWO'
 
         # Cycling walks the list and wraps around.
         p.write_text('')

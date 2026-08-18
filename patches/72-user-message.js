@@ -54,13 +54,13 @@
 // before the first character of text appears, and a terminal that narrow is
 // better off with an unframed message than with a box and no content.
 //
-// WHY `underline` IS OFFERED AND `inverse` IS NOT
+// WHY `inverse` IS NOT OFFERED
 // `Theme` in `src/tui/theme/theme.ts` exposes `fg`, `boldFg`, `dimFg`,
 // `italicFg`, `underlineFg` and `strikethroughFg` — each a `chalk` call on the
-// palette colour. `underline` maps onto one of them and needs no hand-written
-// SGR. There is no inverse variant there, and writing the escape by hand would
-// mean owning a colour reset that the theme currently owns, so that value does
-// not exist.
+// palette colour. Every style offered here maps onto one of them and needs no
+// hand-written SGR. There is no inverse variant there, and writing the escape
+// by hand would mean owning a colour reset that the theme currently owns, so
+// that value does not exist.
 //
 // The style applies to the message text only; the marker stays bold. The marker
 // is a marker whether or not the text next to it is dimmed, and keeping it out
@@ -77,7 +77,12 @@
 //   `topbottom`. `topbottom` draws a rule above and below and no sides.
 //
 // `user_message_style` — `default` (bold, as Kimi ships it) | `plain` |
-//   `italic` | `dim` | `underline`.
+//   `italic` | `dim` | `underline` | `strikethrough`.
+//
+// The *colour* of your own messages is not here: it is the `roleUser` token
+// in the theme, which Kimi already loads from a file. Adding a second place
+// to set it would mean two answers to one question, so the menu points at the
+// theme editor instead.
 //
 // Setting all three to their defaults makes this patch a no-op.
 
@@ -94,11 +99,12 @@ const FRAMES = {
 };
 
 const STYLES = {
-  default:   'boldFg',
-  plain:     'fg',
-  italic:    'italicFg',
-  dim:       'dimFg',
-  underline: 'underlineFg',
+  default:       'boldFg',
+  plain:         'fg',
+  italic:        'italicFg',
+  dim:           'dimFg',
+  underline:     'underlineFg',
+  strikethrough: 'strikethroughFg',
 };
 
 if (BORDER !== 'off' && FRAMES[BORDER] === undefined) {

@@ -1067,7 +1067,8 @@ USER_FRAMES = {
 }
 
 STYLE_SGR = {'default': '\x1b[1m', 'plain': '', 'italic': '\x1b[3m',
-             'dim': '\x1b[2m', 'underline': '\x1b[4m'}
+             'dim': '\x1b[2m', 'underline': '\x1b[4m',
+             'strikethrough': '\x1b[9m'}
 
 
 def user_message_preview(st: State) -> list[str]:
@@ -1108,6 +1109,8 @@ def screen_user_message(st: State) -> m.Screen:
         note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('user-message'))
         rows = [Item('info', 'read while the patches are applied — '
                              'a change here needs a patch run'),
+                Item('info', 'the colour is the `roleUser` token in your theme, '
+                             'not a setting here'),
                 Item('sep')]
         for key in keys:
             label, help_text, _ = PATCH_HELP[key]

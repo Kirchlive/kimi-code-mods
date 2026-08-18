@@ -297,7 +297,12 @@ def draw(screen: Screen, st, items: list[Item], cursor: int) -> dict:
     list that was just printed. That holds as long as the screen fits the
     window; on a very short terminal the top scrolls away and clicks land off.
     """
-    sys.stdout.write('\x1b[2J\x1b[H')
+    # `2J` clears the window, `3J` clears the scrollback behind it. Without
+    # the second one a menu taller than the window leaves its previous drawing
+    # above the current one: scroll up and there are two headers, which is
+    # what it looks like when the same screen has been drawn twice. It has
+    # not — the old one simply never went anywhere.
+    sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
     if sys.stdout.isatty():
         sys.stdout.write(HIDE_CURSOR)
     row_map: dict[int, int] = {}
@@ -347,7 +352,7 @@ def field(title: str, value: str = '', hint: str = '', width: int = FIELD_WIDTH)
     inner = width - 2
     try:
         while True:
-            sys.stdout.write('\x1b[2J\x1b[H')
+            sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
             if color:
                 sys.stdout.write(HIDE_CURSOR)
             shown = text[-inner:] if len(text) > inner else text
