@@ -50,6 +50,12 @@ LABEL_WIDTH = 30
 HIDE_CURSOR = '\x1b[?25l'
 SHOW_CURSOR = '\x1b[?25h'
 
+# Where the next character will go while a row is being typed into. A drawn
+# bar rather than the terminal's own cursor: the screen is redrawn from the
+# top on every keystroke, so a real cursor would have to be positioned again
+# afterwards, and this way what is being edited is legible in a screenshot.
+EDIT_CURSOR = '|'
+
 # tweakcc draws the row you are on in bold cyan and everything it says *about*
 # that row dimmed. Worth copying exactly: the mark alone is one character wide
 # and easy to lose on a full screen, and dimming the explanation stops it
@@ -91,7 +97,7 @@ class Item:
 
     def __init__(self, kind, label='', value=lambda st: '', note=lambda st: '',
                  key='', choices=None, on_cycle=None, on_enter=None,
-                 on_delete=None, help=''):
+                 on_delete=None, edit_start=None, on_edit=None, help=''):
         self.kind = kind
         self.label = label
         self.value = value
@@ -107,6 +113,13 @@ class Item:
         # meaning, and the destructive one is the key that already means
         # "remove" on every keyboard.
         self.on_delete = on_delete
+        # A row that is typed into rather than stepped through. `edit_start`
+        # gives the text the field opens on; `on_edit` receives what was
+        # typed, or is not called at all when the edit was abandoned. Both
+        # together are what lets the value be edited where it is shown,
+        # instead of on a screen of its own that hides the row it belongs to.
+        self.edit_start = edit_start
+        self.on_edit = on_edit
         self.help = help
 
     @property
@@ -130,14 +143,17 @@ class Screen:
     """
 
     def __init__(self, build, header=None, activate=None, cycle=None,
-                 reload=None, delete=None, aside=None, inline_help=False,
-                 help_line=HELP_SUB, title=''):
+                 reload=None, delete=None, aside=None, edit=None,
+                 edit_start=None, inline_help=False, help_line=HELP_SUB,
+                 title=''):
         self.build = build
         self._header = header
         self._activate = activate
         self._cycle = cycle
         self._reload = reload
         self._delete = delete
+        self._edit = edit
+        self._edit_start = edit_start
         self._aside = aside
         # Where a screen is a list of doors rather than of values, the useful
         # thing to say about the row you are on is what is behind it — and
@@ -186,6 +202,20 @@ class Screen:
         """
         return list(self._aside(st, selected)) if self._aside is not None else []
 
+    def edit(self, st, item, text: str) -> None:
+        if item.on_edit is not None:
+            item.on_edit(st, item, text)
+        elif self._edit is not None:
+            self._edit(st, item, text)
+
+    def editable(self, st, item) -> str | None:
+        """The text an in-place edit of this row starts from, or None."""
+        if item.edit_start is not None:
+            return str(item.edit_start(st, item))
+        if self._edit_start is not None:
+            return self._edit_start(st, item)
+        return None
+
     def delete(self, st, item) -> bool:
         """Remove what a row stands for. False when the row has nothing to remove."""
         if item.on_delete is not None:
@@ -203,7 +233,7 @@ class Screen:
 
 def render(screen: Screen, st, items: list[Item], cursor: int,
            row_map: dict | None = None, color: bool = False,
-           width: int | None = None) -> list[str]:
+           width: int | None = None, editing: tuple | None = None) -> list[str]:
     """The screen as lines, recording which line each row landed on.
 
     A preview, when the screen has one, is appended to the same lines rather
@@ -222,8 +252,15 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
             lines.append(f'  {it.label}')
             continue
         mark = CURSOR if i == cursor else ' '
-        value = it.value(st)
-        note = it.note(st)
+        # A row being typed into shows what has been typed so far with a bar
+        # after it, in place of its value. Drawn here rather than on a screen
+        # of its own so the row keeps its place in the list: what is being
+        # changed stays visible next to everything it sits among.
+        if editing is not None and i == editing[0]:
+            value, note = editing[1] + EDIT_CURSOR, ''
+        else:
+            value = it.value(st)
+            note = it.note(st)
         if note:
             value = f'{value}   [{note}]' if value else f'[{note}]'
         arrows = ' ‹›' if (it.kind == 'cycle' or it.on_cycle) else '   '
@@ -805,6 +842,47 @@ def handle(screen: Screen, st, items: list[Item], cursor: int, key,
 # --------------------------------------------------------------------------
 
 
+def edit_row(screen: Screen, st, items: list[Item], cursor: int,
+             start: str) -> str | None:
+    """Type into one row, in place. Returns the text, or None if abandoned.
+
+    The same reading of the keys as `field`: an arrow is navigation and
+    cannot become text, backspace deletes, escape means nothing was entered.
+    What differs is where it happens — the whole screen stays drawn, so the
+    value being changed is still surrounded by the ones it has to fit with.
+    """
+    if not sys.stdin.isatty():
+        return None
+    text = start
+    try:
+        while True:
+            sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+            if sys.stdout.isatty():
+                sys.stdout.write(HIDE_CURSOR)
+            print('\n'.join(render(screen, st, items, cursor, None,
+                                   color=sys.stdout.isatty(),
+                                   width=terminal_width(),
+                                   editing=(cursor, text))))
+            print(paint('  enter saves · backspace deletes · esc cancels',
+                        DIM, sys.stdout.isatty()))
+            sys.stdout.flush()
+
+            with raw_mode():
+                key = read_key()
+            if key == 'enter':
+                return text
+            if key in ('esc', 'ctrl-c', 'eof'):
+                return None
+            if key == 'backspace':
+                text = text[:-1]
+                continue
+            if isinstance(key, Mouse) or len(key) != 1 or not key.isprintable():
+                continue
+            text += key
+    finally:
+        show_cursor()
+
+
 def loop(screen: Screen, st) -> int:
     """Drive one screen until it is left. Returns 0.
 
@@ -835,6 +913,23 @@ def loop(screen: Screen, st) -> int:
             with raw_mode(mouse=True):
                 key = read_key()
             show_cursor()
+
+            # Enter on a row that is typed into edits it where it stands,
+            # rather than opening a screen that hides the list it belongs to.
+            item = items[cursor] if 0 <= cursor < len(items) else None
+            if key == 'enter' and item is not None:
+                start = screen.editable(st, item)
+                if start is not None:
+                    typed = edit_row(screen, st, items, cursor, start)
+                    if typed is not None:
+                        screen.edit(st, item, typed)
+                    st = screen.reload(st)
+                    items = screen.build(st)
+                    cursor = min(cursor, len(items) - 1)
+                    if not items[cursor].selectable:
+                        cursor = first_selectable(items)
+                    continue
+
             cursor, keep, reload_ = handle(screen, st, items, cursor, key, row_map)
             if not keep:
                 break
@@ -1070,6 +1165,42 @@ def _selfcheck() -> int:
           seen and seen[-1] is told_rows[0], seen)
     render(told, store, told_rows, 3)
     check('and follows the cursor', seen[-1] is told_rows[3], seen[-1])
+
+    # -- typing into the row itself ------------------------------------------
+    # A value edited on a screen of its own hides the list it belongs to, and
+    # the list is what tells you whether the value fits. So the row becomes
+    # the field: what has been typed is drawn where the value was, with a bar
+    # after it.
+    typed_at = []
+    editable_row = Item('action', 'Name', lambda st: st.get('typed', '—'),
+                        key='name',
+                        edit_start=lambda st, it: st.get('typed', ''),
+                        on_edit=lambda st, it, text: typed_at.append(text))
+    rows_e = [editable_row, Item('cycle', 'Colour', lambda st: st['colour'],
+                                 key='colour', choices=CHOICES)]
+    screen_e = Screen(lambda st: rows_e)
+    check('a row can say what an edit of it starts from',
+          screen_e.editable(store, editable_row) == '',
+          screen_e.editable(store, editable_row))
+    check('and a row that is not typed into says so',
+          screen_e.editable(store, rows_e[1]) is None)
+
+    drawn_e = render(screen_e, store, rows_e, 0, editing=(0, 'ab'))
+    check('the row being typed into shows what was typed',
+          any('ab' + EDIT_CURSOR in l for l in drawn_e), drawn_e)
+    check('and its usual value is out of the way',
+          not any('—' in l for l in drawn_e), drawn_e)
+    check('the rows around it are untouched',
+          any(store['colour'] in l for l in drawn_e), drawn_e)
+
+    plain_e = render(screen_e, store, rows_e, 0)
+    check('with nothing being edited the value is back',
+          any('—' in l for l in plain_e) and EDIT_CURSOR not in ''.join(plain_e),
+          plain_e)
+
+    screen_e.edit(store, editable_row, 'typed in place')
+    check('accepting hands the text to the row', typed_at == ['typed in place'],
+          typed_at)
 
     # -- the explanation on the row itself -----------------------------------
     inline = Screen(build, activate=activate, cycle=cycle, title='inline',

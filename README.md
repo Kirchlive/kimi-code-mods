@@ -161,6 +161,14 @@ invisible in a way nothing else would report.
 anything reads a line, including on the way out. The selected row is already
 marked; a second block blinking under the last line only competes with it.
 
+**A value is typed where it is shown.** Editing on a screen of its own hides
+the list the value belongs to — and the list is what tells you whether the
+value fits among the others. So the row becomes the field: what has been typed
+appears where the value was, with a bar after it, and everything around it
+stays drawn. Enter accepts, escape leaves the value alone, backspace deletes a
+character. On the row itself, backspace puts Kimi's own value back — one key,
+one meaning, on every screen.
+
 **Nothing reads a line of text any more.** `input()` reads in cooked mode, so
 an arrow key pressed out of habit arrived as the three bytes of its escape
 sequence *inside the returned string* — and that string was written to

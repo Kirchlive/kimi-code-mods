@@ -55,8 +55,14 @@
 //   colors   🔴🟠🟡🟢🔵🟣 double-width, like the moon set
 //   arc      ◜◠◝◞◡◟ a ring drawn in quarters
 //   star     ·✢✳✶✻✽ the shape Claude Code uses
-//   mirror   keep Kimi's frames but run them forwards, then backwards
 //   custom   the frames in `spinner_frames`
+//
+// `spinner_mirror` runs whichever frames were chosen forwards and then
+// backwards, so the spinner swings instead of jumping from the last frame to
+// the first. It used to be a *style* of its own, which meant it could only
+// ever mirror Kimi's own frames — choosing it and choosing a preset were the
+// same decision, and you could not have both. As a switch it applies to every
+// style, including your own frames.
 //
 // `spinner_frames` is only read by `custom`. Frames are separated by spaces
 // where there are any, and taken one code point at a time where there are not
@@ -74,6 +80,11 @@
 const STYLE = String(settings.get('spinner_style', 'default')).toLowerCase();
 const RATE = String(settings.get('spinner_interval_ms', 'default')).toLowerCase();
 const FRAMES_SETTING = String(settings.get('spinner_frames', 'default'));
+const MIRROR = String(settings.get('spinner_mirror', 'off')).toLowerCase();
+
+if (!['on', 'off'].includes(MIRROR)) {
+  throw new Error(`spinner_mirror must be on or off - got "${MIRROR}"`);
+}
 
 const PRESETS = {
   braille: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
@@ -97,7 +108,7 @@ function kimiModsSpinnerFrames(setting) {
   return parts.length > 1 ? parts : Array.from(raw.trim());
 }
 
-const CHOICES = ['default', 'mirror', 'custom'].concat(Object.keys(PRESETS));
+const CHOICES = ['default', 'custom'].concat(Object.keys(PRESETS));
 if (!CHOICES.includes(STYLE)) {
   throw new Error(`spinner_style must be one of ${CHOICES.join(', ')} - got "${STYLE}"`);
 }
@@ -125,7 +136,7 @@ if (RATE !== 'default') {
   }
 }
 
-if (STYLE === 'default' && ms === null) {
+if (STYLE === 'default' && ms === null && MIRROR === 'off') {
   throw new Error('already patched');
 }
 
@@ -177,11 +188,13 @@ const isMirrored = list =>
   list.length % 2 === 0 && list.every((f, i) => f === list[list.length - 1 - i]);
 
 for (const name of ['BRAILLE_SPINNER_FRAMES', 'MOON_SPINNER_FRAMES']) {
-  if (STYLE === 'default') break;
+  if (STYLE === 'default' && MIRROR === 'off') break;
   const found = readFrames(name);
-  const wanted = STYLE === 'mirror'
-    ? (isMirrored(found.list) ? found.list : found.list.concat([...found.list].reverse()))
+  const chosen = STYLE === 'default' ? found.list
     : (STYLE === 'custom' ? custom : PRESETS[STYLE]);
+  const wanted = MIRROR === 'on' && !isMirrored(chosen)
+    ? chosen.concat([...chosen].reverse())
+    : chosen;
   const replacement = writeFrames(name, wanted);
   if (replacement === found.text) continue;
   out = out.replace(found.text, () => replacement);

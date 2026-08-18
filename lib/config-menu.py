@@ -730,7 +730,9 @@ def screen_extra_dirs(st: Editing) -> m.Screen:
             items.append(Item('info', 'none configured'))
         items += [
             Item('sep'),
-            Item('action', 'Add a directory', lambda x: '', key='add'),
+            Item('action', 'Add a directory', lambda x: '', key='add',
+                 edit_start=lambda x, i: '', on_edit=add_dir,
+                 help='An absolute path, `~/…`, or one relative to the project root.'),
             Item('action', 'Save', lambda x: 'keep this list', key='save'),
             Item('action', 'Back', lambda x: 'discard the changes', key='back'),
         ]
@@ -750,12 +752,12 @@ def screen_extra_dirs(st: Editing) -> m.Screen:
             else:
                 s.doc.remove('', K_EXTRA_SKILL_DIRS)
             return False
-        if item.key == 'add':
-            raw = ask('Extra skill directory',
-                      hint='An absolute path, `~/…`, or one relative to the project root.')
-            if raw and raw not in dirs:
-                dirs.append(raw)
         return True
+
+    def add_dir(s: Editing, item: Item, text: str) -> None:
+        path = text.strip()
+        if path and path not in dirs:
+            dirs.append(path)
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
                     help_line=m.HELP_DEL, title='Extra skill directories')
@@ -790,6 +792,9 @@ def screen_loop(st: Editing) -> m.Screen:
                              (lambda k: lambda x: fmt_state(*shown(x.data, k, S_LOOP)))(key),
                              key=f'num:{key}', on_cycle=step_number,
                              on_delete=reset,
+                             edit_start=(lambda k: lambda x, i: str(
+                                 shown(x.data, k, S_LOOP)[0] or ''))(key),
+                             on_edit=type_number,
                              help='‹› steps through the usual values, enter types '
                                   'one, backspace hands it back to Kimi'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
@@ -820,22 +825,19 @@ def screen_loop(st: Editing) -> m.Screen:
             i = 0
         write(s, key, steps[(i + (1 if forward else -1)) % len(steps)])
 
+    def type_number(s: Editing, item: Item, text: str) -> None:
+        nonlocal message
+        key = item.key[4:]
+        if text.strip().isdigit():
+            write(s, key, int(text.strip()))
+        elif text.strip():
+            message = f'not written — {text.strip()!r} is not a number'
+
     def act(s: Editing, item: Item) -> bool:
         nonlocal message
         message = ''
         if item.key == 'back':
             return False
-        if item.key.startswith('num:'):
-            key = item.key[4:]
-            cur = shown(s.data, key, S_LOOP)[0]
-            raw = ask(key, str(cur) if cur is not None else '',
-                      hint='A whole number. Escape leaves it as it is.')
-            if raw is None or raw == '':
-                return True
-            if raw.isdigit():
-                write(s, key, int(raw))
-            else:
-                message = f'not written — {raw!r} is not a number'
         return True
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
@@ -891,6 +893,8 @@ def screen_hooks(st: Editing) -> m.Screen:
             rows.append(Item('action', event,
                              (lambda c: lambda x: (c[:44] + '…') if len(c) > 45 else c)(command),
                              key=f'hook:{i}', on_delete=drop,
+                             edit_start=(lambda c: lambda x, i2: c)(command),
+                             on_edit=replace_command,
                              help='enter replaces the command, backspace deletes the hook'))
         if not hooks:
             rows.append(Item('info', 'none configured'))
@@ -934,29 +938,25 @@ def screen_hooks(st: Editing) -> m.Screen:
             message = f'added a {event} hook'
             return True
 
-        if item.key.startswith('hook:'):
-            idx = int(item.key[5:])
-            hooks = hooks_of(s)
-            if not 0 <= idx < len(hooks):
-                return True
-            current = str(hooks[idx].get('command', ''))
-            raw = (ask('Command', current,
-                       hint=f'What {hooks[idx].get("event", "this event")} runs. '
-                            'Escape leaves it as it is.') or '').strip()
-            if not raw:
-                return True
-            # The block is rewritten rather than edited in place: `set` cannot
-            # address the second table of a repeated section, and inventing a
-            # positional variant of it for one screen would be the wrong place
-            # to put that knowledge.
-            hook = dict(hooks[idx])
-            hook['command'] = raw
-            order = ['event', 'command', 'matcher', 'timeout']
-            pairs = [(k, lit(hook[k])) for k in order if k in hook]
-            s.doc.remove_table(S_HOOKS, idx)
-            s.doc.append_table(S_HOOKS, pairs)
-            message = 'command replaced — the hook moves to the end of the file'
         return True
+
+    def replace_command(s: Editing, item: Item, text: str) -> None:
+        nonlocal message
+        idx = int(item.key[5:])
+        hooks = hooks_of(s)
+        if not 0 <= idx < len(hooks) or not text.strip():
+            return
+        # The block is rewritten rather than edited in place: `set` cannot
+        # address the second table of a repeated section, and inventing a
+        # positional variant of it for one screen would be the wrong place
+        # to put that knowledge.
+        hook = dict(hooks[idx])
+        hook['command'] = text.strip()
+        order = ['event', 'command', 'matcher', 'timeout']
+        pairs = [(k, lit(hook[k])) for k in order if k in hook]
+        s.doc.remove_table(S_HOOKS, idx)
+        s.doc.append_table(S_HOOKS, pairs)
+        message = 'command replaced — the hook moves to the end of the file'
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
                     help_line=m.HELP_DEL, title='Event hooks')
@@ -1068,9 +1068,16 @@ def screen_subagent(st: Editing) -> m.Screen:
                          key='force', choices=['on', 'off'],
                          help='On pins every subagent to default_model and removes '
                               'the choice. Cannot be combined with a pool.'))
+        # With a pool the value has to be one of its entries, so it is picked
+        # from them; without one there is nothing to pick from and it is typed
+        # in the row.
         rows.append(Item('action', K_SM_DEFAULT,
                          lambda x: fmt_state(*shown(x.data, K_SM_DEFAULT, S_SECONDARY)),
                          key=f'txt:{K_SM_DEFAULT}', on_delete=reset,
+                         edit_start=(None if models else
+                                     lambda x, i: str(shown(x.data, K_SM_DEFAULT,
+                                                            S_SECONDARY)[0] or '')),
+                         on_edit=(None if models else type_default_model),
                          help='The model used unless the main agent picks another. '
                               'Must be one of the pool entries when a pool exists.'))
         rows.append(Item('info', f'pool: {len(models)} model(s)'))
@@ -1098,17 +1105,11 @@ def screen_subagent(st: Editing) -> m.Screen:
 
         if item.key.startswith('txt:'):
             key = item.key[4:]
-            cur = shown(s.data, key, S_SECONDARY)[0]
-            # With a pool, the value has to be one of its entries — so it is
-            # picked from them. Without one there is nothing to pick from and
-            # the field is the only honest option.
-            if models:
-                raw = m.pick(key, sorted(models),
-                             hint='Must name one of the pool entries.',
-                             note=lambda a: str(models.get(a) or ''))
-            else:
-                raw = ask(key, str(cur) if cur is not None else '',
-                          hint='An alias from your model catalogue.')
+            if not models:
+                return True                    # typed in the row instead
+            raw = m.pick(key, sorted(models),
+                         hint='Must name one of the pool entries.',
+                         note=lambda a: str(models.get(a) or ''))
             if not raw:
                 return True
             section[key] = raw.strip()
@@ -1141,6 +1142,21 @@ def screen_subagent(st: Editing) -> m.Screen:
             s.doc.remove(S_SECONDARY, K_SM_MODELS)
             message = 'pool emptied'
         return True
+
+    def type_default_model(s: Editing, item: Item, text: str) -> None:
+        """Written only if Kimi would accept it, checked before the write."""
+        nonlocal message
+        value = text.strip()
+        if not value:
+            return
+        section = dict(s.data.get(S_SECONDARY) or {})
+        section[K_SM_DEFAULT] = value
+        problems = subagent_rules(section, flag_on(s))
+        if problems:
+            message = 'not written — ' + problems[0]
+            return
+        s.doc.set(S_SECONDARY, K_SM_DEFAULT, lit(value))
+        message = f'{K_SM_DEFAULT} = {value}'
 
     def cyc(s: Editing, item: Item, forward: bool) -> None:
         nonlocal message
@@ -1232,7 +1248,8 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
             rows.append(Item('info', 'none saved yet'))
         rows += [Item('sep'),
                  Item('action', 'Save what is disabled now', lambda x: '', key='save',
-                      help='Names the current list so you can come back to it.'),
+                      edit_start=lambda x, i: '', on_edit=save_named,
+                      help='Type a name for the tools disabled right now.'),
                  Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -1249,24 +1266,7 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
         message = ''
         if item.key == 'back':
             return False
-        if item.key == 'save':
-            current = sorted((s.data.get(S_TOOLS) or {}).get('disabled') or [])
-            if not current:
-                message = 'nothing to save — no tool is disabled right now'
-                return True
-            name = (ask('Name for this set',
-                        hint=f'{len(current)} disabled tool(s) will be saved under it.')
-                    or '').strip()
-            if not name:
-                return True
-            if '=' in name or ',' in name:
-                message = 'not saved — a name cannot contain "=" or ","'
-                return True
-            sets = read_toolsets(path)
-            sets[name] = current
-            write_toolsets(sets, path)
-            message = f'saved "{name}" with {len(current)} tool(s)'
-        elif item.key.startswith('use:'):
+        if item.key.startswith('use:'):
             name = item.key[4:]
             tools = read_toolsets(path).get(name, [])
             if tools:
@@ -1275,6 +1275,23 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
                 s.doc.remove(S_TOOLS, 'disabled')
             message = f'applied "{name}" — write the file to keep it'
         return True
+
+    def save_named(s: Editing, item: Item, text: str) -> None:
+        nonlocal message
+        current = sorted((s.data.get(S_TOOLS) or {}).get('disabled') or [])
+        name = text.strip()
+        if not current:
+            message = 'nothing to save — no tool is disabled right now'
+            return
+        if not name:
+            return
+        if '=' in name or ',' in name:
+            message = 'not saved — a name cannot contain "=" or ","'
+            return
+        sets = read_toolsets(path)
+        sets[name] = current
+        write_toolsets(sets, path)
+        message = f'saved "{name}" with {len(current)} tool(s)'
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
                     help_line=m.HELP_DEL, title='Tool sets')
@@ -1689,6 +1706,18 @@ def _selfcheck():
         finally:
             m.pick = real
 
+    def type_into(screen, state, key, text):
+        """Type into a row and accept it, without a terminal.
+
+        The rows that used to open a field are edited in place now, and
+        in-place editing lives in `loop` — so a scripted test drives the
+        two halves the row supplies rather than the loop that joins them.
+        """
+        rows = screen.build(state)
+        item = next(r for r in rows if r.key == key)
+        assert screen.editable(state, item) is not None, f'{key} is not editable'
+        screen.edit(state, item, text)
+
     CATALOGUE = [('Alpha', 900), ('Beta', 120), ('Gamma', 30)]
 
     with tempfile.TemporaryDirectory() as td:
@@ -1839,9 +1868,8 @@ def _selfcheck():
         st = editing()
         dirs = screen_extra_dirs(st)
         rows = dirs.build(st)
-        with answering('~/skills'), quiet():
-            m.handle(dirs, st, rows,
-                     next(i for i, r in enumerate(rows) if r.key == 'add'), 'enter')
+        with quiet():
+            type_into(dirs, st, 'add', '~/skills')
         rows = dirs.build(st)
         ok('an added directory becomes a row',
            any(r.key == 'dir:~/skills' for r in rows))
@@ -1883,14 +1911,14 @@ def _selfcheck():
         rows = lp.build(st)
         attempts = next(i for i, r in enumerate(rows) if r.key == f'num:{K_ATTEMPTS}')
         before = st.doc.text()
-        with answering('not a number'), quiet():
-            m.handle(lp, st, rows, attempts, 'enter')
+        with quiet():
+            type_into(lp, st, f'num:{K_ATTEMPTS}', 'not a number')
         ok('a non-number writes nothing', st.doc.text() == before)
-        with answering(''), quiet():
-            m.handle(lp, st, rows, attempts, 'enter')
+        with quiet():
+            type_into(lp, st, f'num:{K_ATTEMPTS}', '')
         ok('an empty answer writes nothing', st.doc.text() == before)
-        with answering('7'), quiet():
-            m.handle(lp, st, rows, attempts, 'enter')
+        with quiet():
+            type_into(lp, st, f'num:{K_ATTEMPTS}', '7')
         ok('a number is written',
            tomllib.loads(st.doc.text())[S_LOOP][K_ATTEMPTS] == 7)
 
@@ -1998,8 +2026,8 @@ def _selfcheck():
         ts = screen_toolsets(st, sets_path)
 
         ok('no sets to begin with', read_toolsets(sets_path) == {})
-        with answering('cron'), quiet():
-            press(ts, st, 'save', 'enter')
+        with quiet():
+            type_into(ts, st, 'save', 'cron')
         ok('the current list is saved under a name',
            read_toolsets(sets_path) == {'cron': ['CronCreate', 'CronList']},
            read_toolsets(sets_path))

@@ -30,7 +30,8 @@ DEFAULTS = {
     'read_limits': 'default',         # default | moderate | large
     'auto_accept_plan': 'off',        # on | off
     'effort_router': 'off',           # off | pin | free
-    'spinner_style': 'default',       # default | mirror | a preset | custom
+    'spinner_style': 'default',       # default | a preset | custom
+    'spinner_mirror': 'off',          # on runs the frames forwards then back
     'spinner_interval_ms': 'default',  # default, or 20..2000
     'spinner_frames': 'default',      # the frames `custom` uses, space separated
     'thinking_verbs': 'off',          # on | off
@@ -52,8 +53,9 @@ CHOICES = {
     'read_limits': ['default', 'moderate', 'large'],
     'auto_accept_plan': ['off', 'on'],
     'effort_router': ['off', 'pin', 'free'],
-    'spinner_style': ['default', 'mirror', 'braille', 'dots', 'moon', 'blocks',
+    'spinner_style': ['default', 'braille', 'dots', 'moon', 'blocks',
                       'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
+    'spinner_mirror': ['off', 'on'],
     # A duration is a number, but only a handful of them are worth having: below
     # 40 ms the difference stops being visible and above 400 the spinner reads
     # as stuck. Offering the useful ones as a list is what lets the whole screen

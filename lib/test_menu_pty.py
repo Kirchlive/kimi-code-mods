@@ -58,14 +58,12 @@ def cycle(st, item, forward):
     i = CHOICES.index(st['colour'])
     st['colour'] = CHOICES[(i + (1 if forward else -1)) % len(CHOICES)]
 
-def activate(st, item):
-    if item.key == 'name':
-        got = m.field('Name', hint='type something')
-        st['typed'] = '(escaped)' if got is None else repr(got)
-    return True
+def edited(st, item, text):
+    st['typed'] = repr(text)
 
-m.loop(Screen(build, cycle=cycle, activate=activate, title='pty screen',
-              help_line=m.HELP_ROOT), state)
+m.loop(Screen(build, cycle=cycle, title='pty screen',
+              edit_start=lambda st, it: '' if it.key == 'name' else None,
+              edit=edited, help_line=m.HELP_ROOT), state)
 '''
 
 ANSI = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]')
@@ -193,38 +191,35 @@ def main() -> int:
         # renders without a terminal can only prove the opposite.
         check('the selected row is drawn in colour', '\x1b[1;36m' in s.buf)
 
-        # The field, which is the whole reason `input()` is gone. Typing an
-        # arrow key into it must leave no trace in the value: as a line reader
-        # it arrived as \x1b[C inside the string, and that string was written
-        # to config.toml, where the next parse threw on the escape byte.
+        # Typing happens in the row, not on a screen of its own. An arrow key
+        # pressed while typing must leave no trace in the value: read as a
+        # line, it arrived as \x1b[C inside the string, and that string was
+        # written to config.toml, where the next parse threw on the escape
+        # byte.
         s.type(b'\x1b[B')                             # down to the Name row
-        check('the field row is reachable', 'Name' in s.cursor(), s.cursor())
+        check('the row that is typed into is reachable',
+              'Name' in s.cursor(), s.cursor())
         s.type(b'\r')
-        check('enter opens a bordered field', '╭' in s.buf.split('\x1b[2J')[-1])
+        after = ANSI.sub('', s.buf.split('\x1b[2J')[-1])
+        check('the list stays on screen while typing',
+              'Alpha' in after and 'Colour' in after, after[:200])
+        check('and the row carries the cursor',
+              any('Name' in l and menu.EDIT_CURSOR in l
+                  for l in after.splitlines()), after[:300])
+
         s.type(b'ab')
         s.type(b'\x1b[C\x1b[D\x1b[A')                 # arrows: navigation, not text
         s.type(b'c')
         s.type(b'\x7f')                               # backspace deletes one
         s.type(b'\r')
-        check('the field returns what was typed', "'ab'" in s.cursor(), s.cursor())
+        check('the row keeps what was typed', "'ab'" in s.cursor(), s.cursor())
         check('and no escape byte reached the value',
               '\\x1b' not in s.cursor() and '^[' not in s.cursor(), s.cursor())
 
-        # The frame is drawn by columns, not by characters. An emoji is one
-        # character and two columns, so a marker with one in it would push the
-        # right edge out by one for every emoji typed.
         s.type(b'\r')
         s.type('✨🌕'.encode())
-        drawn = ANSI.sub('', s.buf.split('\x1b[2J')[-1]).splitlines()
-        frame = [l for l in drawn if l.startswith('  ╭') or l.startswith('  │')
-                 or l.startswith('  ╰')]
-        widths = {menu.visible(l) for l in frame}
-        check('the field frame is square around a wide character',
-              len(frame) == 3 and len(widths) == 1, (frame, widths))
-
         s.type(b'\x1b')                               # escape cancels outright
-        check('escape leaves the value alone',
-              '(escaped)' in s.cursor(), s.cursor())
+        check('escape leaves the value alone', "'ab'" in s.cursor(), s.cursor())
 
         # Leaving has to give it back, or the shell you return to has no
         # cursor. Typing q ends the loop, whose `finally` shows it again.

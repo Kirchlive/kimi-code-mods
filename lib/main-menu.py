@@ -713,6 +713,10 @@ PATCH_HELP = {
     'spinner_frames': (
         'Your own spinner frames',
         'The frames the `custom` style uses. Separate with spaces.', 'spinner'),
+    'spinner_mirror': (
+        'Reverse-mirror run',
+        'Run the frames forwards then backwards, so the spinner swings '
+        'instead of jumping back to the first.', 'spinner'),
     'user_message_marker': (
         'Your message marker',
         'The prefix in front of what you typed. Kimi\'s own is a sparkle.', 'user-message'),
@@ -737,7 +741,7 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
     'verbs': ('Thinking verbs', ['thinking_verbs', 'thinking_verbs_list',
                                  'thinking_verbs_format']),
     'style': ('Thinking style', ['spinner_style', 'spinner_interval_ms',
-                                 'spinner_frames']),
+                                 'spinner_frames', 'spinner_mirror']),
     'usermsg': ('User message display', ['user_message_marker',
                                          'user_message_border',
                                          'user_message_style']),
@@ -792,12 +796,42 @@ def at_default(*keys: str):
                           == str(ps.DEFAULTS[k]) for k in keys)
 
 
+# What Kimi's own value actually is, where the setting spells it `default`.
+# A row reading `default` names the fact that nothing was changed twice — the
+# note beside it already says that — while saying nothing about what Kimi
+# will do. These are the words for what it does.
+DEFAULT_MEANS = {
+    'user_message_style': 'bold',
+    'suggestion_height': 'five',
+    'read_limits': '1000 lines',
+    'spinner_style': 'braille',
+    'spinner_interval_ms': '80/120 ms',
+    'input_box_border': 'round',
+    'spinner_frames': '—',
+    'thinking_verbs_list': 'built-in',
+}
+
+
+def restore_default(st, item) -> None:
+    """Backspace on any switch puts Kimi's own value back.
+
+    One key, one meaning, on every screen: ‹› changes a value, backspace
+    removes what you did to it. Before this it worked on some rows and not
+    others, which is worse than not having it — a key that does nothing on
+    the row you are on reads as a key that does nothing.
+    """
+    if item.key in ps.DEFAULTS:
+        ps.set_value(item.key, ps.DEFAULTS[item.key], st.settings_path)
+
+
 def switch_value(key: str):
     """The value cell for one switch, as a checkbox where that is truthful."""
     two_state = set(ps.CHOICES.get(key) or []) == {'on', 'off'}
 
     def read(st: State) -> str:
         raw = str(st.settings.get(key, ps.DEFAULTS.get(key, '')))
+        if raw == 'default' and key in DEFAULT_MEANS:
+            return DEFAULT_MEANS[key]
         return BOX.get(raw, raw) if two_state else raw
     return read
 
@@ -822,9 +856,13 @@ def screen_settings(st: State, group: str) -> m.Screen:
                 rows.append(Item('cycle', label, value, note,
                                  key=key, choices=ps.CHOICES[key], help=help_text))
             else:
-                # No list can hold a duration or a prefix, so enter asks.
-                rows.append(Item('action', label, value, note,
-                                 key=key, help=help_text + '  (enter to type a value)'))
+                # No list can hold a prefix or a set of frames, so this one is
+                # typed — in the row itself, where the value it replaces is.
+                rows.append(Item('action', label, value, note, key=key,
+                                 edit_start=(lambda k: lambda x, i: str(
+                                     x.settings.get(k, ps.DEFAULTS[k])))(key),
+                                 on_edit=free_text_edit,
+                                 help=help_text + '  (enter types a value)'))
         # Everything else on the root menu opens a screen of its own. The
         # fullscreen renderer never did — it was one switch sitting among the
         # doors — so it belongs here with the other switches. It is the one
@@ -872,19 +910,16 @@ def screen_settings(st: State, group: str) -> m.Screen:
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
+    def free_text_edit(s: State, item: Item, text: str) -> None:
+        """An emptied row means the default, which is what backspace does too."""
+        ps.set_value(item.key, text.strip() or ps.DEFAULTS[item.key], s.settings_path)
+
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
         if item.key.startswith('colors:'):
             open_colors(item.key[7:].split(','), 'Composer frame colours')
             return True
-        if item.key in ps.DEFAULTS and item.key not in ps.CHOICES:
-            current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
-            raw = ask(item.key, current,
-                      hint='Escape leaves it as it is; backspace on the row '
-                           'restores the default.')
-            if raw is not None and raw != '':
-                ps.set_value(item.key, raw, s.settings_path)
         return True
 
     def drop_permission(s: State, item: Item) -> None:
@@ -903,11 +938,7 @@ def screen_settings(st: State, group: str) -> m.Screen:
         else:
             ps.cycle(item.key, forward, s.settings_path)
 
-    def restore(s: State, item: Item) -> None:
-        if item.key in ps.DEFAULTS:
-            ps.set_value(item.key, ps.DEFAULTS[item.key], s.settings_path)
-
-    return m.Screen(build, activate=act, cycle=cyc, delete=restore,
+    return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
                     reload=reload_state, help_line=m.HELP_DEL, title=title)
 
 
@@ -1005,6 +1036,14 @@ def screen_thinking_style(st: State) -> m.Screen:
     presets = patch_table(st.patch_file('spinner'), 'PRESETS')
     keys = SETTING_GROUPS['style'][1]
 
+    def interval_value(x: State) -> str:
+        raw = x.settings.get('spinner_interval_ms', 'default')
+        return DEFAULT_MEANS['spinner_interval_ms'] if raw == 'default' else f'{raw} ms'
+
+    def frames_value(x: State) -> str:
+        raw = x.settings.get('spinner_frames', 'default')
+        return DEFAULT_MEANS['spinner_frames'] if raw in ('', 'default') else str(raw)
+
     def build(s: State) -> list[Item]:
         current = s.settings.get('spinner_style', 'default')
         note = value_note(lambda x: current, at_default(*keys),
@@ -1015,8 +1054,6 @@ def screen_thinking_style(st: State) -> m.Screen:
         for name in ps.CHOICES['spinner_style']:
             if name == 'default':
                 shown = 'Kimi\'s own'
-            elif name == 'mirror':
-                shown = 'Kimi\'s own, then reversed'
             elif name == 'custom':
                 raw = s.settings.get('spinner_frames', 'default')
                 shown = '—' if raw in ('', 'default') else ' '.join(spinner_frames(s)[:10])
@@ -1029,19 +1066,32 @@ def screen_thinking_style(st: State) -> m.Screen:
                              key=f'style:{name}'))
         rows += [
             Item('sep'),
-            Item('cycle', 'Update interval',
-                 lambda x: (lambda v: 'Kimi\'s own' if v == 'default' else f'{v} ms')(
-                     x.settings.get('spinner_interval_ms', 'default')),
+            # The note is asked about the *shown* value, not the stored one:
+            # a row showing `80/120 ms` has had nothing changed, and a note
+            # deciding on the word `default` behind it would stay silent.
+            Item('cycle', 'Update interval', interval_value,
+                 value_note(interval_value, at_default('spinner_interval_ms'),
+                            lambda x: ''),
                  key='spinner_interval_ms', choices=ps.CHOICES['spinner_interval_ms'],
                  help='How long one frame stays on screen. Lower is faster.'),
-            Item('action', 'Your own frames',
-                 lambda x: (lambda v: '—' if v in ('', 'default') else v)(
-                     x.settings.get('spinner_frames', 'default')),
+            Item('cycle', 'Reverse-mirror run', switch_value('spinner_mirror'),
+                 value_note(switch_value('spinner_mirror'),
+                            at_default('spinner_mirror'), lambda x: ''),
+                 key='spinner_mirror', choices=ps.CHOICES['spinner_mirror'],
+                 help='Off runs the frames start to end and starts over; on '
+                      'runs them there and back.'),
+            Item('action', 'Your own frames', frames_value,
+                 value_note(frames_value, at_default('spinner_frames'),
+                            lambda x: ''),
                  key='spinner_frames',
                  on_delete=lambda s, i: ps.set_value('spinner_frames', 'default',
                                                      s.settings_path),
+                 edit_start=lambda x, i: (lambda v: '' if v in ('', 'default')
+                                          else str(v))(
+                     x.settings.get('spinner_frames', 'default')),
+                 on_edit=edit_frames,
                  help='Separate frames with spaces, or write them run together. '
-                      'Picked up by the custom row above.'),
+                      'Two or more; typing them picks the custom row above.'),
             Item('sep'),
             Item('submenu', 'Colours', lambda x: 'primary, textDim',
                  key='colors:primary,textDim',
@@ -1059,24 +1109,23 @@ def screen_thinking_style(st: State) -> m.Screen:
             return True
         if item.key.startswith('style:'):
             ps.set_value('spinner_style', item.key[6:], s.settings_path)
-        elif item.key == 'spinner_frames':
-            raw = ask('Your own frames',
-                      '' if s.settings.get('spinner_frames') in ('default', '') else
-                      s.settings.get('spinner_frames'),
-                      hint='Two or more. "⠋ ⠙ ⠹" and "⠋⠙⠹" mean the same thing; '
-                           'use spaces for frames made of several characters.')
-            if raw:
-                ps.set_value('spinner_frames', raw, s.settings_path)
-                ps.set_value('spinner_style', 'custom', s.settings_path)
         return True
+
+    def edit_frames(s: State, item: Item, text: str) -> None:
+        """Frames typed in are the frames you want, so the style follows them."""
+        if not text.strip():
+            ps.set_value('spinner_frames', 'default', s.settings_path)
+            return
+        ps.set_value('spinner_frames', text.strip(), s.settings_path)
+        ps.set_value('spinner_style', 'custom', s.settings_path)
 
     def cyc(s: State, item: Item, forward: bool) -> None:
         if item.key in ps.CHOICES:
             ps.cycle(item.key, forward, s.settings_path)
 
-    return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
-                    aside=spinner_preview, help_line=m.HELP_DEL,
-                    title='Thinking style')
+    return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
+                    reload=reload_state, aside=spinner_preview,
+                    help_line=m.HELP_DEL, title='Thinking style')
 
 
 def verb_words(st: State) -> list[str]:
@@ -1103,6 +1152,9 @@ def verb_preview(st: State, sel=None) -> list[str]:
 def screen_thinking_verbs(st: State) -> m.Screen:
     """The words beside the spinner: whether they rotate, which ones, and how."""
 
+    def format_value(x: State) -> str:
+        return str(x.settings.get('thinking_verbs_format', '{}'))
+
     def build(s: State) -> list[Item]:
         rotate = lambda x: BOX.get(x.settings.get('thinking_verbs', 'off'), '?')  # noqa: E731
         note = value_note(rotate, at_default(*SETTING_GROUPS['verbs'][1]),
@@ -1114,10 +1166,15 @@ def screen_thinking_verbs(st: State) -> m.Screen:
                      note, key='thinking_verbs', choices=ps.CHOICES['thinking_verbs'],
                      help='Off keeps Kimi\'s two fixed words.'),
                 Item('action', 'Format',
-                     lambda x: x.settings.get('thinking_verbs_format', '{}'),
+                     format_value,
+                     value_note(format_value, at_default('thinking_verbs_format'),
+                                lambda x: ''),
                      key='thinking_verbs_format',
                      on_delete=lambda s2, i: ps.set_value('thinking_verbs_format', '{}',
                                                           s2.settings_path),
+                     edit_start=lambda x, i: str(
+                         x.settings.get('thinking_verbs_format', '{}')),
+                     on_edit=edit_format,
                      help='Where the word goes. {} is the word.'),
                 Item('sep'),
                 Item('info', 'the words, in the order they rotate'),
@@ -1126,7 +1183,10 @@ def screen_thinking_verbs(st: State) -> m.Screen:
             rows.append(Item('action', f'  {word}', lambda x: '', key=f'verb:{i}',
                              on_delete=drop_word,
                              help='backspace removes it from the list'))
-        rows += [Item('action', 'Add a word', lambda x: '', key='add'),
+        rows += [Item('action', 'Add a word', lambda x: '', key='add',
+                      edit_start=lambda x, i: '', on_edit=add_word,
+                      help='Shown beside the spinner. Punctuation is yours to '
+                           'include.'),
                  Item('action', 'Kimi-mods\' own list', lambda x: '', key='reset',
                       help='Puts the built-in words back.'),
                  Item('sep'),
@@ -1154,28 +1214,26 @@ def screen_thinking_verbs(st: State) -> m.Screen:
         if item.key.startswith('colors:'):
             open_colors(item.key[7:].split(','), 'Thinking colours')
             return True
-        if item.key == 'add':
-            word = ask('A word', hint='Shown beside the spinner. '
-                                      'Punctuation is yours to include.')
-            if word:
-                write_words(s, verb_words(s) + [word])
-        elif item.key == 'reset':
+        if item.key == 'reset':
             ps.set_value('thinking_verbs_list', 'default', s.settings_path)
-        elif item.key == 'thinking_verbs_format':
-            raw = ask('Format', s.settings.get('thinking_verbs_format', '{}'),
-                      hint='{} is the word. "{}…" and "· {}" are the other '
-                           'obvious shapes.')
-            if raw and '{}' in raw:
-                ps.set_value('thinking_verbs_format', raw, s.settings_path)
         return True
+
+    def add_word(s: State, item: Item, text: str) -> None:
+        if text.strip():
+            write_words(s, verb_words(s) + [text.strip()])
+
+    def edit_format(s: State, item: Item, text: str) -> None:
+        """A format with nowhere for the word would show one fixed string."""
+        if '{}' in text:
+            ps.set_value('thinking_verbs_format', text, s.settings_path)
 
     def cyc(s: State, item: Item, forward: bool) -> None:
         if item.key in ps.CHOICES:
             ps.cycle(item.key, forward, s.settings_path)
 
-    return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
-                    aside=verb_preview, help_line=m.HELP_DEL,
-                    title='Thinking verbs')
+    return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
+                    reload=reload_state, aside=verb_preview,
+                    help_line=m.HELP_DEL, title='Thinking verbs')
 
 
 # The frame each border setting draws, read the same way the patch draws it.
@@ -1310,9 +1368,11 @@ def screen_user_message(st: State) -> m.Screen:
                                  choices=ps.CHOICES[key], help=help_text))
             else:
                 rows.append(Item('action', label, value, note, key=key,
-                                 on_delete=restore,
-                                 help=help_text + '  (enter types one, '
-                                                  'backspace restores the default)'))
+                                 edit_start=lambda x, i: marker_field(
+                                     str(x.settings.get(i.key, ps.DEFAULTS[i.key]))),
+                                 on_edit=edit_marker,
+                                 help=help_text + '  (enter types one, empty '
+                                                  'means no marker at all)'))
         rows += [Item('sep'),
                  Item('submenu', 'Colours', lambda x: 'roleUser in your theme',
                       key='colors:roleUser',
@@ -1324,30 +1384,26 @@ def screen_user_message(st: State) -> m.Screen:
     def restore(s: State, item: Item) -> None:
         ps.set_value(item.key, ps.DEFAULTS[item.key], s.settings_path)
 
+    def edit_marker(s: State, item: Item, text: str) -> None:
+        value = marker_setting(text)
+        if value is not None:
+            ps.set_value(item.key, value, s.settings_path)
+
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
         if item.key.startswith('colors:'):
             open_colors(item.key[7:].split(','), 'Your message colour')
             return True
-        if item.key in keys and item.key not in ps.CHOICES:
-            current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
-            typed = ask('Your message marker', marker_field(current),
-                        hint='What sits in front of your own messages. '
-                             'Leave the field empty for no marker at all.',
-                        width=MARKER_FIELD_WIDTH)
-            value = marker_setting(typed)
-            if value is not None:
-                ps.set_value(item.key, value, s.settings_path)
         return True
 
     def cyc(s: State, item: Item, forward: bool) -> None:
         if item.key in ps.CHOICES:
             ps.cycle(item.key, forward, s.settings_path)
 
-    return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
-                    aside=user_message_preview, help_line=m.HELP_DEL,
-                    title='User message display')
+    return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
+                    reload=reload_state, aside=user_message_preview,
+                    help_line=m.HELP_DEL, title='User message display')
 
 
 # Three of the groups are not a list of switches but a thing you look at: a
@@ -2001,8 +2057,31 @@ def _selfcheck() -> int:
         notes = {r.key: r.note(state()) for r in misc2.build(state()) if r.selectable}
         check('a changed row with no patch behind it still says so',
               notes.get('read_line_numbers') == NO_PATCH, notes)
-        check('and a row whose value already reads default says nothing',
-              notes.get('read_limits') == '', notes)
+        # `read_limits` used to *show* the word `default`, which named the
+        # fact that nothing was changed twice while saying nothing about what
+        # Kimi does. It shows what Kimi does now, so the note carries the
+        # other half.
+        misc_rows = {r.key: r for r in misc2.build(state()) if r.selectable}
+        # Every switch that is untouched has to say so, whatever word its
+        # value happens to show. The two that got this wrong showed what Kimi
+        # does — `80/120 ms`, `—` — while the note looked at the stored word
+        # `default` behind it and stayed silent.
+        settings.write_text('')
+        for screen_name, maker in (('style', screen_thinking_style),
+                                   ('verbs', screen_thinking_verbs),
+                                   ('usermsg', screen_user_message)):
+            here = state()
+            silent = [r.key for r in maker(here).build(here)
+                      if r.selectable and r.key in ps.DEFAULTS
+                      and r.note(here) not in ('default', NO_PATCH)]
+            check(f'{screen_name}: every untouched switch says default',
+                  not silent, silent)
+
+        check('a value that spelled itself `default` now says what Kimi does',
+              misc_rows['read_limits'].value(state()) == DEFAULT_MEANS['read_limits'],
+              misc_rows['read_limits'].value(state()))
+        check('and the note carries the other half',
+              notes.get('read_limits') == 'default', notes)
         check('nothing anywhere still says it is waiting',
               'waiting' not in ' '.join(
                   str(r.note(state())) for g in SETTING_GROUPS
