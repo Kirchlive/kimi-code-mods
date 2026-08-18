@@ -141,6 +141,26 @@ fact and is skipped by navigation; `sep` is a rule. A row may also do both —
 carrying an `on_cycle` lets enter ask for a typed value while ‹› clears it,
 which is how a colour or a duration gets a row at all.
 
+**The root menu follows tweakcc's order**, so that anyone arriving from it
+finds the same things in the same places: appearance first, then the model and
+routing settings, then Kimi's own configuration, then the doors out. Two of
+tweakcc's entries have nothing behind them here — Fable plan mode and Better
+Claude in Chrome are Claude-only — and their places are taken by the two
+things tweakcc has no equivalent for, tool and hook setup. Two more of its
+entries have no Kimi counterpart at all and are simply absent: input pattern
+highlighters, and the system-reminder overrides.
+
+The patch switches are grouped the way tweakcc groups them (Thinking verbs,
+Thinking style, User message display, the effort router, and Misc for the
+rest) rather than piled onto one screen. Every registered switch has to appear
+in exactly one group and every group has to be reachable from the root menu —
+both are checked, because a switch that is registered and unreachable is
+invisible in a way nothing else would report.
+
+**The terminal cursor is hidden while a screen is up** and shown again before
+anything reads a line, including on the way out. The selected row is already
+marked; a second block blinking under the last line only competes with it.
+
 Two things follow from how it is drawn. The mouse map is built by the same
 pass that renders, so a click cannot land on the wrong row; and anything that
 is not a row — header, separator, the help line — is inert rather than treated

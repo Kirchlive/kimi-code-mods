@@ -25,7 +25,9 @@ longer the way through.
 usage: main-menu.py [--selfcheck] [--dry-run]
 """
 
+import contextlib
 import importlib.util
+import io
 import os
 import re
 import subprocess
@@ -95,6 +97,7 @@ class State:
                               if not is_os_cruft(p.name)) if self.patch_dir.is_dir() else []
         self.is_patched = self.binary_state.startswith('patched')
         self.settings = ps.load(self.settings_path)
+        self.status_key = status_key(self.root, self.binary)
 
     def _field(self, name, default, cast=str):
         m = re.search(rf'^{name}\s*:\s*(.+?)\s*$', self.raw, re.M)
@@ -178,6 +181,32 @@ def read_status(root: Path) -> str:
     return r.stdout if r.stdout.strip() else r.stderr
 
 
+def status_key(root: Path, binary: Path) -> tuple:
+    """What `kimi-patch.sh --status` could possibly have to say something new about.
+
+    Asking it costs six seconds, because deciding whether the installed binary
+    is one of ours means hashing 180 MB of it. The menu asks after every
+    action, so changing a permission mode used to be followed by a six-second
+    pause on a screen that had already been redrawn — which reads as the menu
+    hanging, and is the reason this exists.
+
+    Everything in that answer is derived from two things: the installed binary,
+    and the prompt overrides. Neither changes when you edit `config.toml`, the
+    launcher profile or a patch switch, so the answer is reused whenever both
+    are untouched. Cheap to compute, and wrong only if something rewrites the
+    binary with the same size and timestamp.
+    """
+    try:
+        s = binary.stat()
+        binary_stamp = (s.st_mtime, s.st_size)
+    except OSError:
+        binary_stamp = None
+    prompts = root / 'system-prompts'
+    newest = max((f.stat().st_mtime for f in usable_files(prompts)), default=0.0) \
+        if prompts.is_dir() else 0.0
+    return (binary_stamp, newest)
+
+
 def binary_path(state_raw: str) -> Path | None:
     m = re.search(r'^binary\s*:\s*(.+?)\s*$', state_raw, re.M)
     return Path(m.group(1)) if m else None
@@ -248,49 +277,103 @@ def suggestion_entries(level: str, rows: int | None = None) -> int:
 # --------------------------------------------------------------------------
 
 
+def group_value(st: State, keys: list[str]) -> str:
+    """What a group of switches shows on its root row.
+
+    One switch shows its value. Several show only the ones that are no longer
+    at their default, because a row reading "default, default, off" says
+    nothing while "braille, 80" says exactly what you changed.
+    """
+    if len(keys) == 1:
+        return str(st.settings.get(keys[0], ps.DEFAULTS[keys[0]]))
+    changed = [str(st.settings.get(k, ps.DEFAULTS[k])) for k in keys
+               if st.settings.get(k, ps.DEFAULTS[k]) != ps.DEFAULTS[k]]
+    if not changed:
+        return 'default'
+    # Two values still read as values. More than that and a list of bare
+    # settings ("full, on, on") says less than its own length does.
+    return ', '.join(changed) if len(changed) <= 2 else f'{len(changed)} changed'
+
+
 def build_items(st: State) -> list[Item]:
     data = config_summary(st)
     disabled = (data.get(cfg.S_TOOLS) or {}).get('disabled') or []
-    extra = data.get(cfg.K_EXTRA_SKILL_DIRS) or []
     builtin = data.get(cfg.K_BUILTIN_SKILLS)
+    extra = data.get(cfg.K_EXTRA_SKILL_DIRS) or []
     perm = data.get(cfg.K_PERMISSION)
     loop = data.get(cfg.S_LOOP) or {}
 
-    sugg_patch = st.patch_file('suggestion')
-    wd_patch = st.patch_file('wd')
-    click_patch = st.patch_file('cursor') or st.patch_file('click')
+    def switches(group: str):
+        """The value cell for a group row, read from patch-settings.conf."""
+        keys = SETTING_GROUPS[group][1]
+        return lambda s: group_value(s, keys)
 
-    def note_for(patch):
-        return lambda s: s.feature_note(patch)
+    def group_note(group: str):
+        """Whether the patch behind a group has reached the binary yet."""
+        needles = {PATCH_HELP[k][2] for k in SETTING_GROUPS[group][1]}
+        patches = [st.patch_file(n) for n in sorted(needles)]
+        if any(p is None for p in patches):
+            return lambda s: 'patch not installed'
+        return lambda s: next((n for n in (s.feature_note(p) for p in patches) if n), '')
 
+    # The order is tweakcc's, so that muscle memory carries over from it: the
+    # appearance settings first, then the model and routing ones, then Kimi's
+    # own configuration, and the doors out at the bottom. Two tweakcc entries
+    # have nothing behind them here — Fable plan mode and Better Claude in
+    # Chrome are Claude-only — and their places are taken by the two settings
+    # tweakcc has no equivalent for, tool and hook setup.
     items = [
-        Item('submenu', 'System prompts',
-             lambda s: f'{s.prompts_total} files, {s.prompts_edited} edited',
-             key='prompts',
-             help='View, price and migrate the overrides in system-prompts/.'),
-        Item('submenu', 'Tools',
-             lambda s: f'{len(disabled)} disabled' if disabled else 'none disabled',
-             key='tools',
-             help='Every tool description ships in every request; an unused tool is a per-turn tax.'),
-        Item('submenu', 'Skills',
-             lambda s: 'builtin off' if builtin is False else 'builtin on',
-             key='skills',
-             help='Kimi\'s builtin product skills, on or off.'),
-        Item('submenu', 'Extra skill directories',
-             lambda s: f'{len(extra)} configured' if extra else 'none',
-             key='extradirs',
-             help='Mount skill collections from elsewhere without copying them.'),
-        Item('submenu', 'Merge skill directories',
-             lambda s: ('on' if data.get(cfg.K_MERGE_SKILLS) is not False
-                        else 'off') + '   [no effect in 0.36.0]',
-             key='mergeskills',
-             help='Search every brand directory or only the first — identical while each lists one.'),
         Item('submenu', 'Themes',
              lambda s: (lambda n: f'{n} custom' if n else 'built-in only')(
                  len(themes.list_themes())),
              key='themes',
-             help='Kimi loads themes from ~/.kimi-code/themes; switch with /theme.'),
-        Item('submenu', 'Permission mode',
+             help='Modify Kimi Code\'s built-in themes or create your own.'),
+        Item('submenu', 'Thinking verbs', switches('verbs'), group_note('verbs'),
+             key='verbs',
+             help='Rotate the word beside the spinner instead of always saying "working".'),
+        Item('submenu', 'Thinking style', switches('style'), group_note('style'),
+             key='style',
+             help='The characters the working indicator cycles through, and how fast.'),
+        Item('submenu', 'User message display', switches('usermsg'), group_note('usermsg'),
+             key='usermsg',
+             help='How your own messages are drawn in the transcript.'),
+        Item('submenu', 'Misc', switches('misc'), group_note('misc'),
+             key='misc',
+             help='The switches that belong to no group of their own.'),
+        Item('submenu', 'Toolsets',
+             lambda s: (lambda n: f'{n} saved' if n else 'none saved')(
+                 len(cfg.read_toolsets())),
+             key='toolsets',
+             help='Named lists of disabled tools, applied in one keystroke.'),
+        Item('submenu', 'Subagent models',
+             lambda s: (lambda sec: 'forced' if sec.get('force') is True
+                        else (f"pool of {len(sec.get('models') or {})}"
+                              if sec.get('models') else
+                              (sec.get('default_model') or 'same as the main agent')))(
+                 data.get(cfg.S_SECONDARY) or {}),
+             key='subagent',
+             help='Which model a subagent runs on. Needs the secondary-model flag.'),
+        Item('submenu', 'Complexity effort router', switches('router'), group_note('router'),
+             key='router',
+             help='Set reasoning effort per turn from the prompt. pin only ever raises it.'),
+        Item('submenu', 'Tool setup',
+             lambda s: f'{len(disabled)} disabled' if disabled else 'none disabled',
+             key='tools',
+             help='Every tool description ships in every request; an unused tool is a per-turn tax.'),
+        Item('submenu', 'AGENTS.md alternative names', switches('agentsmd'),
+             group_note('agentsmd'), key='agentsmd',
+             help='Also read CLAUDE.md and friends. AGENTS.md keeps priority; one file per directory.'),
+        Item('submenu', 'Skill setup',
+             lambda s: ('builtin off' if builtin is False else 'builtin on')
+             + (f', {len(extra)} extra dir(s)' if extra else ''),
+             key='skills',
+             help='Kimi\'s own product skills, and where else skills are read from.'),
+        Item('submenu', 'Hook setup',
+             lambda s: (lambda h: f'{len(h)} configured' if h else 'none')(
+                 data.get(cfg.S_HOOKS) if isinstance(data.get(cfg.S_HOOKS), list) else []),
+             key='hooks',
+             help='Run a shell command on one of Kimi\'s 20 events.'),
+        Item('submenu', 'Default permission mode',
              lambda s: str(perm) if perm else 'manual (Kimi default)',
              key='permission',
              help='What Kimi does before running a tool call. yolo skips the prompt.'),
@@ -300,39 +383,12 @@ def build_items(st: State) -> list[Item]:
              key='loop',
              help='Attempts per step, and context held back for the answer.'),
         Item('submenu', 'Reasoning',
-             lambda s: (lambda t: ', '.join(f'{k}={v}' for k, v in t.items())
-                        if t else 'Kimi\'s own')(data.get(cfg.S_THINKING) or {}),
+             lambda s: (lambda t: ', '.join(
+                 ('on' if v is True else 'off' if v is False else str(v))
+                 for v in t.values()) if t else 'Kimi\'s own')(
+                 data.get(cfg.S_THINKING) or {}),
              key='thinking',
              help='How hard the model thinks, and whether thinking is re-sent.'),
-        Item('submenu', 'Subagent model',
-             lambda s: (lambda sec: 'forced' if sec.get('force') is True
-                        else (f"pool of {len(sec.get('models') or {})}"
-                              if sec.get('models') else
-                              (sec.get('default_model') or 'same as the main agent')))(
-                 data.get(cfg.S_SECONDARY) or {}),
-             key='subagent',
-             help='Which model a subagent runs on. Needs the secondary-model flag.'),
-        Item('submenu', 'Event hooks',
-             lambda s: (lambda h: f'{len(h)} configured' if h else 'none')(
-                 data.get(cfg.S_HOOKS) if isinstance(data.get(cfg.S_HOOKS), list) else []),
-             key='hooks',
-             help='Run a shell command on one of Kimi\'s 20 events.'),
-        Item('submenu', 'Tool sets',
-             lambda s: (lambda n: f'{n} saved' if n else 'none saved')(
-                 len(cfg.read_toolsets())),
-             key='toolsets',
-             help='Named lists of disabled tools, applied in one keystroke.'),
-
-        Item('sep'),
-
-        # One row for every patch switch, rather than a handful of the popular
-        # ones here and the rest nowhere. Each setting then has exactly one
-        # place that writes it, which is what keeps the menu and the patches
-        # from disagreeing about a default.
-        Item('submenu', 'Patch settings',
-             lambda s: (lambda n: f'{n} switch(es)')(len(ps.CHOICES)),
-             key='patchsettings',
-             help='Everything the patches read while they are applied.'),
         Item('cycle', 'Fullscreen renderer',
              lambda s: 'always' if env_value(s.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1' else 'default',
              key='fullscreen', choices=['default', 'always'],
@@ -341,24 +397,26 @@ def build_items(st: State) -> list[Item]:
              lambda s: f'{env_count(s.root)} variable(s) set',
              key='display',
              help='How much history is re-sent each turn — the only lever on running cost.'),
-
-        Item('sep'),
-
         Item('submenu', 'Patches',
              lambda s: f'{len(s.patches)} in patches/', key='patches',
              help='The JavaScript patches compiled into the binary.'),
         Item('action', 'Cost report', lambda s: 'what the prompts weigh', key='cost',
              help='Token cost per prompt, and what your edits have saved.'),
+        Item('submenu', 'View system prompts',
+             lambda s: f'{s.prompts_total} files, {s.prompts_edited} edited',
+             key='prompts',
+             help='View, price and migrate the overrides in system-prompts/.'),
 
         Item('sep'),
 
         Item('action', 'Apply', lambda s: 'run kimi-patch.sh', key='apply',
              help='Extract, patch, repack, re-sign and install.'),
-        Item('action', 'Restore', lambda s: 'put the pristine binary back', key='restore',
-             help='Reinstall the untouched baseline binary.'),
+        Item('action', 'Restore original Kimi Code',
+             lambda s: 'keeps your settings', key='restore',
+             help='Reinstall the untouched baseline binary. Nothing you configured is lost.'),
         Item('action', 'Open config.toml', lambda s: '', key='open-config'),
         Item('action', 'Open env profile', lambda s: '', key='open-env'),
-        Item('action', 'Open bundle', lambda s: '', key='open-bundle'),
+        Item('action', 'Open Kimi Code\'s bundle.js', lambda s: '', key='open-bundle'),
         Item('action', 'Exit', lambda s: '', key='quit'),
     ]
     return items
@@ -381,13 +439,39 @@ def banner(st: State) -> list[str]:
 
 
 def header(st: State) -> list[str]:
-    return ['', 'tweakkimi',
-            f'Kimi {st.version} — {st.binary_state}, {st.signature} signature'] + banner(st)
+    """tweakcc's three-line opening, saying what is true here.
+
+    The one line tweakcc uses to say where its settings go has to name three
+    places here rather than one file, so it names the directory that holds
+    them: `patch-settings.conf`, `env-profile.conf`, `patches/` and
+    `system-prompts/` all live in it. `config.toml` is Kimi's own and stays
+    where Kimi reads it, which is why it is named separately.
+    """
+    return ['', ' tweakkimi', '',
+            f'🌕 Customize your Kimi Code installation. Settings will be saved to '
+            f'{tilde(st.root)} and {tilde(st.config_path)}. 🌕', '',
+            f' Kimi {st.version} — {st.binary_state}, {st.signature} signature'] + banner(st)
+
+
+def tilde(path: Path) -> str:
+    """`~/…` where that is shorter, because a home path is noise."""
+    try:
+        return '~/' + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def reload_state(st: State) -> State:
+    """The state again, asking the patcher only when it could have new news.
+
+    A fresh `State` is built either way: the patches, the switches and the
+    config are read from disk every time, which is what makes an edit made in
+    an external editor show up the moment you come back.
+    """
+    if status_key(st.root, st.binary) == st.status_key:
+        return State(st.root, st.raw, st.binary, st.settings_path, st.config_path)
     raw = read_status(st.root)
-    return State(st.root, raw, binary_path(raw))
+    return State(st.root, raw, binary_path(raw), st.settings_path, st.config_path)
 
 
 # The root screen. Everything about drawing, arrow keys, the wheel and clicks
@@ -430,8 +514,33 @@ def open_file(path: Path) -> None:
 
 
 def config_item(st: State, item: str) -> None:
-    """Open one entry of the TOML editor, which owns the writing."""
-    run([sys.executable, str(HERE / 'config-menu.py'), '--item', item], st.root)
+    """Open one config.toml screen inside this process, and write what changed.
+
+    It used to be a subprocess. That put a process boundary in the middle of a
+    keystroke, and the boundary was visible: `--item N` opens the screen, but
+    when you left it the editor fell into *its own* top-level menu — a
+    different title, a different row set, a "Write changes" row — so coming
+    back from a setting landed you somewhere you had never chosen to go.
+
+    In-process there is no second menu to fall into: the screen returns here,
+    to the row you opened it from. The cost is that the editor's deferred write
+    has to be resolved here instead, and it is resolved the way the rest of
+    tweakkimi behaves — a change to a setting is written when you leave the
+    screen that made it. `config-menu.py` run on its own keeps its Write row;
+    that is its interface, and this is ours.
+    """
+    original = st.config_path.read_text() if st.config_path.exists() else ''
+    editing = cfg.Editing(st.config_path, cfg.TomlLines(original), dry_run=False)
+    cfg.open_item(editing, item)
+    if editing.doc.text() == original:
+        return
+    # `commit` prints the diff, keeps a backup and runs Kimi's own validator,
+    # which is the one thing that must not be skipped: a rejected file is
+    # rolled back and the reason only exists on screen. A successful write
+    # needs no acknowledgement — the value it changed is visible in the row
+    # you came back to.
+    if not cfg.commit(st.config_path, editing.doc.text(), False):
+        ask('\n   [enter] back ')
 
 
 def ask(prompt: str) -> str:
@@ -597,19 +706,55 @@ PATCH_HELP = {
 }
 
 
-def screen_patch_settings(st: State) -> m.Screen:
-    """One row per patch switch, in the order they were registered."""
+# The patch switches, split into the screens tweakcc splits them into. Every
+# key in `ps.DEFAULTS` belongs to exactly one group; the self-check proves it,
+# so a switch cannot be registered and then be unreachable from the menu — the
+# failure a single "Patch settings" screen made impossible and this split
+# makes possible again.
+SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
+    'verbs': ('Thinking verbs', ['thinking_verbs']),
+    'style': ('Thinking style', ['spinner_style', 'spinner_interval_ms']),
+    'usermsg': ('User message display', ['user_message_marker',
+                                         'user_message_border',
+                                         'user_message_style']),
+    'router': ('Complexity effort router', ['effort_router']),
+    'agentsmd': ('AGENTS.md alternative names', ['agents_md_names']),
+    'misc': ('Miscellaneous settings', ['suggestion_height', 'wd_command',
+                                        'click_cursor', 'read_line_numbers',
+                                        'expanded_by_default', 'read_limits',
+                                        'auto_accept_plan', 'input_box_border']),
+}
+
+# tweakcc draws a two-state switch as a checkbox and everything else as its
+# value. Worth copying: a checkbox is read without reading, and a switch with
+# four states cannot be one honestly.
+BOX = {'on': '☑ Enabled', 'off': '☐ Disabled'}
+
+
+def switch_value(key: str):
+    """The value cell for one switch, as a checkbox where that is truthful."""
+    two_state = set(ps.CHOICES.get(key) or []) == {'on', 'off'}
+
+    def read(st: State) -> str:
+        raw = str(st.settings.get(key, ps.DEFAULTS.get(key, '')))
+        return BOX.get(raw, raw) if two_state else raw
+    return read
+
+
+def screen_settings(st: State, group: str) -> m.Screen:
+    """One screen of patch switches — a group of `SETTING_GROUPS`."""
+    title, keys = SETTING_GROUPS[group]
 
     def build(s: State) -> list[Item]:
         rows = [Item('info', 'read while the patches are applied — '
                              'a change here needs a patch run'),
                 Item('sep')]
-        for key in ps.DEFAULTS:
+        for key in keys:
             label, help_text, needle = PATCH_HELP.get(
                 key, (key.replace('_', ' ').capitalize(),
                       'No description registered in PATCH_HELP yet.', key.split('_')[0]))
             patch = s.patch_file(needle)
-            value = (lambda k: lambda x: x.settings.get(k, ps.DEFAULTS.get(k, '')))(key)
+            value = switch_value(key)
             note = (lambda q: lambda x: x.feature_note(q))(patch)
             if key in ps.CHOICES:
                 rows.append(Item('cycle', label, value, note,
@@ -634,7 +779,42 @@ def screen_patch_settings(st: State) -> m.Screen:
         ps.cycle(item.key, forward, s.settings_path)
 
     return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
-                    title='Patch settings')
+                    title=title)
+
+
+def screen_skills(st: State) -> m.Screen:
+    """Kimi's own skills and the directories they are read from.
+
+    Three config.toml settings that tweakcc shows as one "Skills" entry. They
+    are three separate keys in the file, so they stay three rows here; what
+    they share is the question being asked, which is what a screen is for.
+    """
+
+    def build(s: State) -> list[Item]:
+        data = config_summary(s)
+        extra = data.get(cfg.K_EXTRA_SKILL_DIRS) or []
+        return [
+            Item('submenu', 'Builtin product skills',
+                 lambda x: 'off' if data.get(cfg.K_BUILTIN_SKILLS) is False else 'on',
+                 key='2', help='Kimi\'s own product skills, on or off.'),
+            Item('submenu', 'Extra skill directories',
+                 lambda x: f'{len(extra)} configured' if extra else 'none',
+                 key='4', help='Mount skill collections from elsewhere without copying them.'),
+            Item('submenu', 'Merge skill directories',
+                 lambda x: ('on' if data.get(cfg.K_MERGE_SKILLS) is not False else 'off'),
+                 lambda x: 'no effect in 0.36.0', key='3',
+                 help='Search every brand directory or only the first — identical while each lists one.'),
+            Item('sep'),
+            Item('action', 'Back', lambda x: '', key='back'),
+        ]
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        config_item(s, item.key)
+        return True
+
+    return m.Screen(build, activate=act, reload=reload_state, title='Skill setup')
 
 
 def screen_patches(st: State) -> m.Screen:
@@ -693,16 +873,14 @@ def activate(st: State, item: Item) -> bool:
     k = item.key
     if k == 'quit':
         return False
-    if k == 'prompts':
+    if k in SETTING_GROUPS:
+        sub(screen_settings(st, k), st)
+    elif k == 'prompts':
         sub(screen_prompts(st), st)
     elif k == 'tools':
         config_item(st, '1')
     elif k == 'skills':
-        config_item(st, '2')
-    elif k == 'extradirs':
-        config_item(st, '4')
-    elif k == 'mergeskills':
-        config_item(st, '3')
+        sub(screen_skills(st), st)
     elif k == 'permission':
         config_item(st, '5')
     elif k == 'loop':
@@ -718,8 +896,6 @@ def activate(st: State, item: Item) -> bool:
     elif k == 'themes':
         state = themes.ThemeState()
         sub(themes.screen_themes(state), state)
-    elif k == 'patchsettings':
-        sub(screen_patch_settings(st), st)
     elif k == 'display':
         sub(screen_display(st), st)
     elif k == 'patches':
@@ -890,8 +1066,8 @@ def _selfcheck() -> int:
 
         # digits still work as a shortcut
         pos5, _, _ = handle(st, items, start, '3')
-        check('digit shortcut selects the third row', items[pos5].label == 'Skills',
-              items[pos5].label)
+        check('digit shortcut selects the third row',
+              items[pos5].label == 'Thinking style', items[pos5].label)
 
         # q and friends leave
         for key in ('q', 'esc', 'ctrl-c', 'eof'):
@@ -901,15 +1077,33 @@ def _selfcheck() -> int:
         # -- value cycling writes through --------------------------------
         # Every patch switch lives on one screen now, so the cycling checks
         # belong there rather than on the root menu.
+        # Every switch has to be reachable from exactly one group, or it is
+        # registered and invisible — the failure the old single screen could
+        # not have and this split can.
+        grouped = [k for _, keys in SETTING_GROUPS.values() for k in keys]
+        check('every registered switch is in a group',
+              set(grouped) == set(ps.DEFAULTS),
+              sorted(set(ps.DEFAULTS) ^ set(grouped)))
+        check('no switch is in two groups',
+              len(grouped) == len(set(grouped)),
+              [k for k in grouped if grouped.count(k) > 1])
+        check('every group is reachable from the root menu',
+              set(SETTING_GROUPS) <= {i.key for i in items},
+              sorted(set(SETTING_GROUPS) - {i.key for i in items}))
+
         settings.write_text('')
-        screen = screen_patch_settings(st)
+        rows_by_group = {g: screen_settings(st, g).build(st) for g in SETTING_GROUPS}
+        for group, grows in rows_by_group.items():
+            keys = SETTING_GROUPS[group][1]
+            check(f'{group}: one row per switch',
+                  [r.key for r in grows if r.selectable and r.key != 'back'] == keys,
+                  [r.key for r in grows])
+            check(f'{group}: every switch row carries help',
+                  all(r.help for r in grows if r.key in keys),
+                  [r.key for r in grows if r.key in keys and not r.help])
+
+        screen = screen_settings(st, 'misc')
         rows = screen.build(st)
-        check('every registered switch has a row',
-              {r.key for r in rows if r.kind == 'cycle'} == set(ps.CHOICES),
-              {r.key for r in rows if r.kind == 'cycle'} ^ set(ps.CHOICES))
-        check('every switch row carries help',
-              all(r.help for r in rows if r.kind == 'cycle'),
-              [r.key for r in rows if r.kind == 'cycle' and not r.help])
 
         idx = next(i for i, r in enumerate(rows) if r.key == 'suggestion_height')
         _, _, reload_ = m.handle(screen, st, rows, idx, 'right')
@@ -935,7 +1129,7 @@ def _selfcheck() -> int:
 
         # the rendered value follows the file
         st = state()
-        rows = screen_patch_settings(st).build(st)
+        rows = screen_settings(st, 'misc').build(st)
         row = next(r for r in rows if r.key == 'suggestion_height')
         check('value reflects the file', row.value(st) == 'half', row.value(st))
 
@@ -943,10 +1137,15 @@ def _selfcheck() -> int:
         out = '\n'.join(render(st, items, first_selectable(items)))
         check('cursor drawn', CURSOR in out)
         check('separators drawn', '─' * 10 in out)
-        check('help line drawn', 'system-prompts/' in out)
+        check('the selected row explains itself',
+              items[first_selectable(items)].help.split('.')[0] in out, out[:400])
+        check('the header says where settings go',
+              '🌕' in out and str(root) in out and str(config) in out, out[:300])
+        check('a home path is shortened', tilde(Path.home() / 'x') == '~/x', tilde(Path.home()))
+        check('a path outside home is left alone', tilde(Path('/tmp/x')) == '/tmp/x')
         check('cycle rows show arrows', '‹›' in out)
-        sw = '\n'.join(m.render(screen_patch_settings(st), st,
-                                 screen_patch_settings(st).build(st), 0))
+        sw = '\n'.join(m.render(screen_settings(st, 'misc'), st,
+                                 screen_settings(st, 'misc').build(st), 0))
         check('patch note shown for a switch with no patch',
               'patch not installed' in sw, sw[:600])
 
@@ -968,7 +1167,7 @@ def _selfcheck() -> int:
                   f'line {line_no}: {lines[line_no]!r} vs {items[item_idx].label!r}')
 
         # Lines that are not entries must not be in the mapping at all.
-        sep_lines = [n for n, l in enumerate(lines) if l.startswith('   ─')]
+        sep_lines = [n for n, l in enumerate(lines) if l.startswith('  ─')]
         check('separators are unmapped', all(n not in row_map for n in sep_lines))
         check('header is unmapped', 0 not in row_map and 1 not in row_map)
 
@@ -976,7 +1175,7 @@ def _selfcheck() -> int:
         # subprocess or opening a submenu. The click-to-act path is exercised
         # on the switch screen above, where advancing a value is the whole
         # effect; here the interesting half is what a click must *not* do.
-        idx = next(i for i, it in enumerate(items) if it.key == 'patchsettings')
+        idx = next(i for i, it in enumerate(items) if it.key == 'misc')
 
         # A click anywhere that is not a row is inert — it must not move the
         # cursor and must not act.
@@ -1089,6 +1288,58 @@ def _selfcheck() -> int:
         check('environment screen lists variables', len(env_names) > 5, env_names)
         check('every environment row is a launcher variable',
               all(n.startswith('KIMI') for n in env_names), env_names)
+
+        # -- the status is only re-read when it could have changed ----------
+        # Asking costs six seconds of hashing, and the menu reloads after
+        # every action. What it reports depends on the binary and the prompt
+        # overrides, so a change to anything else has to reuse the answer.
+        st = state()
+        calls = []
+        real_read = globals()['read_status']
+        globals()['read_status'] = lambda root: calls.append(root) or raw
+        try:
+            again = reload_state(st)
+            check('an unchanged binary is not re-hashed', calls == [], calls)
+            check('the reused state still reads the files',
+                  again.version == '0.36.0' and again.settings_path == settings)
+            check('the reused state kept its config path', again.config_path == config)
+
+            os.utime(binary, (2 ** 31, 2 ** 31))
+            reload_state(st)
+            check('a replaced binary is re-read', len(calls) == 1, calls)
+
+            calls.clear()
+            st2 = state()
+            (root / 'system-prompts' / 'edited.md').write_text('override')
+            reload_state(st2)
+            check('an edited prompt override is re-read', len(calls) == 1, calls)
+        finally:
+            globals()['read_status'] = real_read
+            (root / 'system-prompts' / 'edited.md').unlink(missing_ok=True)
+            os.utime(binary, (1000, 1000))
+
+        # -- the config screens run in this process now ---------------------
+        # They used to be a subprocess, which is what put a foreign top-level
+        # menu between a setting and the row it was reached from. What can
+        # break in the new path is the wiring: the editor is constructed here
+        # and its deferred write is resolved here. The screens themselves are
+        # covered by config-menu's own self-check.
+        editor = cfg.Editing(config, cfg.TomlLines(config.read_text()), dry_run=False)
+        check('the config editor builds from this process',
+              editor.data.get('default_model') == 'kimi-code/k3', editor.data)
+        check('every config row the menu opens exists',
+              all(k in {r.key for r in cfg.screen_main(editor).build(editor)}
+                  for k in ('1', '5', '6', '7', '8', '9', '10')),
+              sorted(r.key for r in cfg.screen_main(editor).build(editor)))
+        check('every skill row the menu opens exists',
+              {r.key for r in screen_skills(st).build(st) if r.selectable}
+              - {'back'} <= {r.key for r in cfg.screen_main(editor).build(editor)},
+              [r.key for r in screen_skills(st).build(st)])
+        untouched = config.read_text()
+        with contextlib.redirect_stdout(io.StringIO()):
+            wrote = cfg.commit(config, untouched, False)
+        check('an unchanged document is not rewritten',
+              wrote and config.read_text() == untouched)
 
         # -- suggestion levels mirror the patch's arithmetic ---------------
         # The patch computes: half = min(floor(rows/2), max(1, rows-5)),

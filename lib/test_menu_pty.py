@@ -170,12 +170,25 @@ def main() -> int:
         s.type(b'\x1b[B')
         check('the menu is still running after nine arrow keys',
               '❯' in s.cursor(), s.cursor())
+
+        # The terminal's own cursor is hidden while a screen is up: with the
+        # selected row already marked, a second block blinking under the last
+        # line is only a distraction. Checked on the raw bytes, because this
+        # is one of the few things a rendered screen cannot show.
+        check('the terminal cursor is hidden while drawing',
+              '\x1b[?25l' in s.buf)
+
+        # Colour is decided by the caller, and only `draw` turns it on. This
+        # is the one place that proves the real path does: a self-check that
+        # renders without a terminal can only prove the opposite.
+        check('the selected row is drawn in colour', '\x1b[1;36m' in s.buf)
+
+        # Leaving has to give it back, or the shell you return to has no
+        # cursor. Typing q ends the loop, whose `finally` shows it again.
+        s.type(b'q')
+        check('and shown again on the way out',
+              s.buf.rstrip().endswith('\x1b[?25h'), repr(s.buf[-20:]))
     finally:
-        try:
-            os.write(s.fd, b'q')
-            time.sleep(0.3)
-        except OSError:
-            pass
         s.close()
 
     print()

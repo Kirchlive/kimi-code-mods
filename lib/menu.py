@@ -31,13 +31,45 @@ sys.path.insert(0, str(HERE))
 from keyreader import Mouse, raw_mode, read_key             # noqa: E402
 
 CURSOR = '❯'                    # the tweakcc marker
-RULE_WIDTH = 66
-LABEL_WIDTH = 26
+RULE_WIDTH = 64
+# Wide enough for the longest row label in the tree ('AGENTS.md alternative
+# names'), so the value column never moves between screens.
+LABEL_WIDTH = 30
+
+# The terminal's own cursor has nothing to point at here — the selected row is
+# marked by `CURSOR`, so a second block blinking under the last line is just a
+# distraction. It is hidden as part of the drawing and shown again before
+# anything that reads a line, which is the only rule that keeps the two in
+# step: a screen is always drawn after an action, so hiding belongs there
+# rather than at the top of the loop.
+HIDE_CURSOR = '\x1b[?25l'
+SHOW_CURSOR = '\x1b[?25h'
+
+# tweakcc draws the row you are on in bold cyan and everything it says *about*
+# that row dimmed. Worth copying exactly: the mark alone is one character wide
+# and easy to lose on a full screen, and dimming the explanation stops it
+# competing with the rows for attention.
+SELECTED = '\x1b[1;36m'
+DIM = '\x1b[2m'
+RESET = '\x1b[0m'
+
+
+def paint(text: str, style: str, on: bool) -> str:
+    """`text` in `style`, or unchanged when colour is off.
+
+    Whether it is on is decided by the caller rather than read from the
+    terminal here, and `render` defaults it to off. Every self-check compares
+    rendered lines against what it expects to read, and a check that passes
+    or fails depending on whether the suite was run through a pipe is worse
+    than no check at all.
+    """
+    return f'{style}{text}{RESET}' if text and on else text
+
 
 # The one line at the bottom of every screen. A submenu adds "esc back",
 # because that is the only key whose meaning differs between the two.
-HELP_ROOT = '   ↑↓ or wheel move · enter or click open · ‹› change · q quit'
-HELP_SUB = '   ↑↓ or wheel move · enter or click open · ‹› change · esc back'
+HELP_ROOT = '  ↑↓ or wheel move · enter or click open · ‹› change · q quit'
+HELP_SUB = '  ↑↓ or wheel move · enter or click open · ‹› change · esc back'
 
 
 class Item:
@@ -94,9 +126,12 @@ class Screen:
         self.title = title
 
     def header(self, st) -> list[str]:
+        # The title is indented by one to sit over the row labels, which start
+        # at column two behind the cursor mark. Done here rather than in each
+        # screen's title string, so no screen can be the one that forgets.
         if self._header is not None:
             return list(self._header(st))
-        return ['', self.title] if self.title else ['']
+        return ['', ' ' + self.title] if self.title else ['']
 
     def activate(self, st, item) -> bool:
         if item.on_enter is not None:
@@ -121,20 +156,18 @@ class Screen:
 
 
 def render(screen: Screen, st, items: list[Item], cursor: int,
-           row_map: dict | None = None) -> list[str]:
+           row_map: dict | None = None, color: bool = False) -> list[str]:
     """The screen as lines, recording which line each row landed on."""
     lines = list(screen.header(st))
     lines.append('')
 
-    n = 0
     for i, it in enumerate(items):
         if it.kind == 'sep':
-            lines.append('   ' + '─' * RULE_WIDTH)
+            lines.append('  ' + '─' * RULE_WIDTH)
             continue
         if it.kind == 'info':
-            lines.append(f'      {it.label}')
+            lines.append(f'  {it.label}')
             continue
-        n += 1
         mark = CURSOR if i == cursor else ' '
         value = it.value(st)
         note = it.note(st)
@@ -143,14 +176,15 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
         arrows = ' ‹›' if (it.kind == 'cycle' or it.on_cycle) else '   '
         if row_map is not None:
             row_map[len(lines)] = i
-        lines.append(f' {mark} {n:>2}  {it.label:<{LABEL_WIDTH}}{arrows} {value}')
+        row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
+        lines.append(paint(row, SELECTED, color) if i == cursor else row)
 
     lines.append('')
     sel = items[cursor] if 0 <= cursor < len(items) else None
     if sel is not None and sel.help:
-        lines.append(f'   {sel.help}')
+        lines.append(paint(f'  {sel.help}', DIM, color))
         lines.append('')
-    lines.append(screen.help_line)
+    lines.append(paint(screen.help_line, DIM, color))
     return lines
 
 
@@ -163,10 +197,20 @@ def draw(screen: Screen, st, items: list[Item], cursor: int) -> dict:
     window; on a very short terminal the top scrolls away and clicks land off.
     """
     sys.stdout.write('\x1b[2J\x1b[H')
+    if sys.stdout.isatty():
+        sys.stdout.write(HIDE_CURSOR)
     row_map: dict[int, int] = {}
-    print('\n'.join(render(screen, st, items, cursor, row_map)))
+    print('\n'.join(render(screen, st, items, cursor, row_map,
+                           color=sys.stdout.isatty())))
     sys.stdout.flush()
     return row_map
+
+
+def show_cursor() -> None:
+    """Give the terminal cursor back before anything reads a line."""
+    if sys.stdout.isatty():
+        sys.stdout.write(SHOW_CURSOR)
+        sys.stdout.flush()
 
 
 # --------------------------------------------------------------------------
@@ -284,31 +328,43 @@ def loop(screen: Screen, st) -> int:
         print('\n'.join(render(screen, st, items, cursor)))
         return 0
 
-    while True:
-        row_map = draw(screen, st, items, cursor)
-        # Raw mode and mouse tracking wrap the keystroke only. Everything a row
-        # may run — the TOML editor, kimi-patch.sh, an editor — reads lines
-        # from this same terminal: cbreak mode would break their prompts, and
-        # tracking left on would feed them escape sequences every time the
-        # pointer moved. Switching both off between keystrokes costs a few
-        # bytes and removes a whole class of interference.
-        with raw_mode(mouse=True):
-            key = read_key()
-        cursor, keep, reload_ = handle(screen, st, items, cursor, key, row_map)
-        if not keep:
-            break
-        if reload_:
-            st = screen.reload(st)
-            items = screen.build(st)
-            cursor = min(cursor, len(items) - 1)
-            if not items[cursor].selectable:
-                cursor = first_selectable(items)
+    try:
+        while True:
+            row_map = draw(screen, st, items, cursor)
+            # Raw mode and mouse tracking wrap the keystroke only. Everything a
+            # row may run — the TOML editor, kimi-patch.sh, an editor — reads
+            # lines from this same terminal: cbreak mode would break their
+            # prompts, and tracking left on would feed them escape sequences
+            # every time the pointer moved. Switching both off between
+            # keystrokes costs a few bytes and removes a whole class of
+            # interference. The cursor is shown again for the same reason:
+            # a row may ask a question, and a prompt with no cursor is worse
+            # than one with a stray cursor under the menu.
+            with raw_mode(mouse=True):
+                key = read_key()
+            show_cursor()
+            cursor, keep, reload_ = handle(screen, st, items, cursor, key, row_map)
+            if not keep:
+                break
+            if reload_:
+                st = screen.reload(st)
+                items = screen.build(st)
+                cursor = min(cursor, len(items) - 1)
+                if not items[cursor].selectable:
+                    cursor = first_selectable(items)
+    finally:
+        show_cursor()
     return 0
 
 
 # --------------------------------------------------------------------------
 # selfcheck
 # --------------------------------------------------------------------------
+
+
+def row_map_line(items, idx, lines) -> int:
+    """Which rendered line a row landed on — for the self-check only."""
+    return next(n for n, l in enumerate(lines) if items[idx].label in l)
 
 
 def _selfcheck() -> int:
@@ -423,11 +479,22 @@ def _selfcheck() -> int:
     lines = render(screen, store, items, start, row_map)
     check('title drawn', any('test screen' in l for l in lines))
     check('cursor drawn', any(CURSOR in l for l in lines))
-    check('separator drawn', any(l.startswith('   ─') for l in lines))
+    check('separator drawn', any(l.startswith('  ─') for l in lines))
     check('info row drawn', any('a fact nobody selects' in l for l in lines))
     check('cycle row shows arrows', any('‹›' in l for l in lines))
     check('help of the selected row drawn', any('the first row' in l for l in lines))
     check('help line drawn', lines[-1] == HELP_SUB, lines[-1])
+    check('nothing is coloured unless asked',
+          not any('\x1b[' in l for l in lines), lines)
+
+    # Colour is a caller's decision, and the row it marks is the selected one.
+    tinted = render(screen, store, items, start, color=True)
+    check('the selected row is bold cyan', tinted[row_map_line(items, start, tinted)]
+          .startswith(SELECTED), tinted[:6])
+    check('an unselected row is left plain',
+          not any(l.startswith(SELECTED) for n, l in enumerate(tinted)
+                  if n != row_map_line(items, start, tinted)), tinted)
+    check('the help line is dimmed', tinted[-1].startswith(DIM), tinted[-1])
 
     # -- the mouse mapping is the drawing ----------------------------------
     check('every selectable row is mapped',
