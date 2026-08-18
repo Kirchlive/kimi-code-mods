@@ -219,13 +219,20 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
         row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
         lines.append(paint(row, SELECTED, color) if i == cursor else row)
 
+    # The preview goes beside the rows, and only the rows. The two lines that
+    # follow — what the selected row is for, and the keys — are sentences, and
+    # a sentence is what decides how wide the left column is if it is allowed
+    # to. Left in, one long explanation would push a preview that fits
+    # comfortably onto the line below the whole menu.
+    lines = beside(lines, screen.aside(st), width)
+
     lines.append('')
     sel = items[cursor] if 0 <= cursor < len(items) else None
     if sel is not None and sel.help:
         lines.append(paint(f'  {sel.help}', DIM, color))
         lines.append('')
     lines.append(paint(screen.help_line, DIM, color))
-    return beside(lines, screen.aside(st), width)
+    return lines
 
 
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
@@ -778,7 +785,9 @@ def _selfcheck() -> int:
     # a wrapped line would take two terminal rows and the mapping counts one.
     narrow = render(wide, store, rows_w, 0, None, width=20)
     check('a narrow window puts the preview below',
-          narrow[-1] == '└────┘', narrow[-3:])
+          '└────┘' in narrow, narrow[-6:])
+    check('and above the help lines',
+          narrow.index('└────┘') < len(narrow) - 1, narrow[-4:])
     check('and nothing is beside the rows there',
           not any('│' in l and 'Colour' in l for l in narrow))
 
