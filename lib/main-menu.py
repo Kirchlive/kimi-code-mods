@@ -1127,6 +1127,40 @@ def marker_value(st: State) -> str:
     return raw
 
 
+def marker_field(current: str) -> str:
+    """What the field starts out holding, for a marker.
+
+    The word `default` is not something anyone wants to edit — it is a name
+    for a character. The field opens on the character itself, so changing it
+    is a matter of replacing what is there rather than knowing that the word
+    has to be deleted first.
+    """
+    if current in ('', 'default'):
+        return KIMI_MARKER
+    return '' if current == 'none' else current
+
+
+def marker_setting(typed):
+    """What to store for a marker typed into the field. `None` leaves it alone.
+
+    Empty means no marker. That follows from the field opening on the
+    character: clearing it is the obvious way to say "nothing there", and it
+    would be a poor answer to that to store an empty string the patch then has
+    to interpret. It is stored as `none`, which is the word the patch already
+    understands.
+
+    Typing Kimi's own character back is stored as `default` rather than as a
+    marker of your own. Both draw the same thing, but `default` leaves the
+    patch a no-op instead of splicing a replacement that changes nothing.
+    """
+    if typed is None:
+        return None
+    value = typed.strip()
+    if not value:
+        return 'none'
+    return 'default' if value == KIMI_MARKER else value
+
+
 def user_message_preview(st: State, sel=None) -> list[str]:
     """Your own message drawn twice: as Kimi does it, and as you asked for it."""
     marker = st.settings.get('user_message_marker', 'default')
@@ -1199,11 +1233,12 @@ def screen_user_message(st: State) -> m.Screen:
             return True
         if item.key in keys and item.key not in ps.CHOICES:
             current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
-            raw = ask(item.key, current,
-                      hint='`default` keeps Kimi\'s ✨, `none` removes it, '
-                           'anything else is used as written.')
-            if raw:
-                ps.set_value(item.key, raw, s.settings_path)
+            typed = ask('Your message marker', marker_field(current),
+                        hint='What sits in front of your own messages. '
+                             'Leave the field empty for no marker at all.')
+            value = marker_setting(typed)
+            if value is not None:
+                ps.set_value(item.key, value, s.settings_path)
         return True
 
     def cyc(s: State, item: Item, forward: bool) -> None:
@@ -1838,6 +1873,34 @@ def _selfcheck() -> int:
                    if r.key == 'user_message_marker')
         check('and that is what the row draws', row.value(state()) == '>>',
               row.value(state()))
+
+        # The field opens on the character, not on the word naming it — the
+        # word is not something anyone wants to edit.
+        check('the field starts on Kimi\'s character',
+              marker_field('default') == KIMI_MARKER, marker_field('default'))
+        check('an unset value is the same as default',
+              marker_field('') == KIMI_MARKER)
+        check('`none` opens an empty field', marker_field('none') == '')
+        check('a marker of your own opens on itself', marker_field('▌') == '▌')
+
+        # And an empty field means no marker, which is the obvious reading of
+        # having cleared the character that was in it.
+        check('an empty field means no marker', marker_setting('') == 'none')
+        check('whitespace alone counts as empty', marker_setting('   ') == 'none')
+        check('escape leaves the setting alone', marker_setting(None) is None)
+        check('a character of your own is stored as written',
+              marker_setting('▌') == '▌')
+        check('typing Kimi\'s own character back is stored as default',
+              marker_setting(KIMI_MARKER) == 'default')
+        check('and so is the same with stray spacing',
+              marker_setting(f' {KIMI_MARKER} ') == 'default')
+
+        # Round trip: what the field offers, accepted unchanged, has to leave
+        # the setting where it was rather than drifting to another spelling.
+        for start in ('default', 'none', '▌', '🌕'):
+            check(f'{start} survives being opened and accepted',
+                  marker_setting(marker_field(start)) == start,
+                  (start, marker_field(start), marker_setting(marker_field(start))))
 
         ps.set_value('user_message_border', 'off', settings)
         ps.set_value('user_message_marker', '▌', settings)

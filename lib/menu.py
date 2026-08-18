@@ -362,12 +362,20 @@ def field(title: str, value: str = '', hint: str = '', width: int = FIELD_WIDTH)
             sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
             if color:
                 sys.stdout.write(HIDE_CURSOR)
-            shown = text[-inner:] if len(text) > inner else text
+            # Trimmed and padded by *columns*, not characters: an emoji is
+            # one character and two columns wide, so counting characters puts
+            # the right-hand edge of the frame one place out for every one
+            # typed. A marker is exactly the kind of value people put an
+            # emoji in.
+            shown = text
+            while visible(shown) > inner - 1:
+                shown = shown[1:]
+            body = shown + '▋'
             lines = ['', ' ' + title, '']
             if hint:
                 lines += [paint('  ' + hint, DIM, color), '']
             lines += ['  ╭' + '─' * width + '╮',
-                      '  │ ' + (shown + '▋').ljust(inner)[:inner] + ' │',
+                      '  │ ' + body + ' ' * max(0, inner - visible(body)) + ' │',
                       '  ╰' + '─' * width + '╯', '',
                       paint('  enter saves · backspace deletes · esc cancels',
                             DIM, color)]

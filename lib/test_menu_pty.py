@@ -29,6 +29,9 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import menu                                                  # noqa: E402
 
 # The menu run inside the pty. Kept as source rather than a fixture file so
 # the whole test is one thing to read.
@@ -207,8 +210,18 @@ def main() -> int:
         check('and no escape byte reached the value',
               '\\x1b' not in s.cursor() and '^[' not in s.cursor(), s.cursor())
 
+        # The frame is drawn by columns, not by characters. An emoji is one
+        # character and two columns, so a marker with one in it would push the
+        # right edge out by one for every emoji typed.
         s.type(b'\r')
-        s.type(b'xy')
+        s.type('✨🌕'.encode())
+        drawn = ANSI.sub('', s.buf.split('\x1b[2J')[-1]).splitlines()
+        frame = [l for l in drawn if l.startswith('  ╭') or l.startswith('  │')
+                 or l.startswith('  ╰')]
+        widths = {menu.visible(l) for l in frame}
+        check('the field frame is square around a wide character',
+              len(frame) == 3 and len(widths) == 1, (frame, widths))
+
         s.type(b'\x1b')                               # escape cancels outright
         check('escape leaves the value alone',
               '(escaped)' in s.cursor(), s.cursor())
