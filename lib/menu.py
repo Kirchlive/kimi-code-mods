@@ -130,8 +130,8 @@ class Screen:
     """
 
     def __init__(self, build, header=None, activate=None, cycle=None,
-                 reload=None, delete=None, aside=None, help_line=HELP_SUB,
-                 title=''):
+                 reload=None, delete=None, aside=None, inline_help=False,
+                 help_line=HELP_SUB, title=''):
         self.build = build
         self._header = header
         self._activate = activate
@@ -139,6 +139,12 @@ class Screen:
         self._reload = reload
         self._delete = delete
         self._aside = aside
+        # Where a screen is a list of doors rather than of values, the useful
+        # thing to say about the row you are on is what is behind it — and
+        # tweakcc says it on the row itself, appended after a dash. A screen
+        # of values keeps its explanation on a line of its own instead, where
+        # a long sentence cannot push the value column around.
+        self.inline_help = inline_help
         self.help_line = help_line
         self.title = title
 
@@ -223,7 +229,14 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
         arrows = ' ‹›' if (it.kind == 'cycle' or it.on_cycle) else '   '
         if row_map is not None:
             row_map[len(lines)] = i
-        row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
+        if screen.inline_help:
+            row = f'{mark} {it.label}'
+            if value:
+                row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
+            if i == cursor and it.help:
+                row = clip(f'{row} - {it.help}', (width or terminal_width()) - 1)
+        else:
+            row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
         lines.append(paint(row, SELECTED, color) if i == cursor else row)
 
     # The preview goes beside the rows, and only the rows. The two lines that
@@ -235,11 +248,28 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
 
     lines.append('')
     sel = items[cursor] if 0 <= cursor < len(items) else None
-    if sel is not None and sel.help:
+    if sel is not None and sel.help and not screen.inline_help:
         lines.append(paint(f'  {sel.help}', DIM, color))
         lines.append('')
     lines.append(paint(screen.help_line, DIM, color))
     return lines
+
+
+def clip(text: str, columns: int) -> str:
+    """`text` cut to fit, by columns rather than characters.
+
+    Cut rather than wrapped: a wrapped line takes two terminal rows and the
+    mouse mapping counts one, so anything that could overflow has to be
+    shortened here instead of by the terminal.
+    """
+    if visible(text) <= columns or columns < 2:
+        return text
+    out = ''
+    for ch in text:
+        if visible(out) + visible(ch) > columns - 1:
+            break
+        out += ch
+    return out + '…'
 
 
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
@@ -1040,6 +1070,44 @@ def _selfcheck() -> int:
           seen and seen[-1] is told_rows[0], seen)
     render(told, store, told_rows, 3)
     check('and follows the cursor', seen[-1] is told_rows[3], seen[-1])
+
+    # -- the explanation on the row itself -----------------------------------
+    inline = Screen(build, activate=activate, cycle=cycle, title='inline',
+                    inline_help=True)
+    rows_i = inline.build(store)
+    out_i = render(inline, store, rows_i, 0, width=100)
+    first_line = next(l for l in out_i if l.startswith(CURSOR))
+    check('the selected row carries its explanation',
+          ' - the first row' in first_line, first_line)
+    check('and the others do not',
+          not any(' - ' in l for l in out_i if not l.startswith(CURSOR)), out_i)
+    check('nothing is repeated under the list',
+          not any(l.strip() == 'the first row' for l in out_i), out_i)
+
+    idx_c = next(i for i, r in enumerate(rows_i) if r.key == 'colour')
+    moved = render(inline, store, rows_i, idx_c, width=100)
+    check('it follows the cursor',
+          any(l.startswith(CURSOR) and ' - cycles' in l for l in moved), moved)
+
+    # A row with a value keeps it, and the explanation follows behind — the
+    # doors and the switches on one screen have to line up either way.
+    check('a value is still shown where there is one',
+          any(store['colour'] in l and ' - cycles' in l for l in moved), moved)
+
+    # Long explanations are cut, not wrapped: a wrapped line takes two
+    # terminal rows and the mouse mapping counts one.
+    wordy = Screen(lambda st: [Item('action', 'Row', key='r',
+                                    help='x' * 200)],
+                   inline_help=True)
+    wordy_rows = wordy.build(store)
+    out_w2 = render(wordy, store, wordy_rows, 0, width=60)
+    check('a long explanation is cut to the window',
+          all(visible(l) < 60 for l in out_w2), [visible(l) for l in out_w2])
+    check('and says that it was', any('…' in l for l in out_w2), out_w2)
+
+    check('clip leaves a short line alone', clip('abc', 10) == 'abc')
+    check('clip counts columns, not characters',
+          visible(clip('🌕🌕🌕🌕', 5)) <= 5, clip('🌕🌕🌕🌕', 5))
 
     check('a wide character counts as two columns', visible('🌕') == 2)
     check('colour codes count as none', visible(f'{DIM}ab{RESET}') == 2)

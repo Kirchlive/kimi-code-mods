@@ -214,14 +214,23 @@ shows it and can change it, and the editor says whether the theme open in
 front of you is the one you will see, because editing any other one changes a
 file and nothing else.
 
-**A row that is untouched says `default`.** Every patch-backed row used to
-read `waiting for apply`, including the ones sitting at Kimi's own value —
-where there is nothing to apply, because the patch is a no-op at that value.
-So the note claimed something was pending about rows where nothing was, and
-the rows where something genuinely was pending did not stand out from them.
-Now `default` marks what has not been changed, `waiting for apply` means it
-has, and a value that already reads `default` is not given the word a second
-time.
+**A row that is untouched says `default`; a changed one says nothing.** Two
+states are worth telling apart and only two. `waiting for apply` used to sit
+beside every patch-backed row — including the ones on Kimi's own value, where
+there is nothing to apply because the patch is a no-op there — and then beside
+every changed one, which is what the banner at the top of the menu already
+says once. Either way the notes carried no information. The one exception is
+a switch with no patch behind it: that row cannot work however it is set,
+which is different in kind from one that has not been applied yet. A value
+that already reads `default` is not given the word a second time.
+
+**The root menu is a list of doors, so it shows no values.** Every row there
+opens a screen that shows the same setting in full, which made the summary
+beside the label the same fact twice — and the summaries were what pushed the
+notes, and then the explanations, off the end of the line. What the row you
+are on is *for* is said on the row itself, appended after a dash the way
+tweakcc does it, and cut to the window rather than wrapped: a wrapped row
+takes two terminal lines where the mouse mapping counts one.
 
 **Screens that configure something visual show it.** Themes, the spinner, the
 rotating verb and your own message frame each draw a preview beside the rows —

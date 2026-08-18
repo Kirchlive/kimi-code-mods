@@ -50,6 +50,13 @@ from oscruft import is_os_cruft, usable_files                # noqa: E402
 PATCH_GLOB = '*.js'
 CURSOR = m.CURSOR               # ❯, the tweakcc marker
 
+# The one thing a row still has to say about its patch. "Waiting for apply" is
+# not: the banner at the top of the menu already says a run is outstanding,
+# and repeating it against every changed row buried the two states worth
+# telling apart — untouched, and everything else. A missing patch is different
+# in kind: the row cannot ever do anything, however it is set.
+NO_PATCH = 'patch not installed'
+
 
 def _load(name: str, filename: str):
     """Import a hyphenated sibling module by path."""
@@ -163,7 +170,7 @@ class State:
     def feature_note(self, patch: Path | None) -> str:
         """Why a patch-backed setting may not be doing anything yet."""
         if patch is None:
-            return 'patch not installed'
+            return NO_PATCH
         if not self.is_patched:
             return 'waiting for apply'
         try:
@@ -328,87 +335,47 @@ def build_items(st: State) -> list[Item]:
     # have nothing behind them here — Fable plan mode and Better Claude in
     # Chrome are Claude-only — and their places are taken by the two settings
     # tweakcc has no equivalent for, tool and hook setup.
+    # No values here. Every one of these rows opens a screen that shows the
+    # same setting in full, so a summary beside the label is the same fact
+    # twice — and the summaries were what pushed the notes, and then the
+    # explanations, off the end of the line. What the row you are on is *for*
+    # is the thing worth saying, and it is said on the row itself.
     items = [
-        Item('submenu', 'Themes',
-             lambda s: (lambda n: f'{n} custom' if n else 'built-in only')(
-                 len(themes.list_themes())),
-             key='themes',
+        Item('submenu', 'Themes', key='themes',
              help='Modify Kimi Code\'s built-in themes or create your own.'),
-        # These two say what they are rather than how many of their keys are
-        # off their default: "on, 16 words" is the answer to the question the
-        # row raises, and "2 changed" is not.
-        Item('submenu', 'Thinking verbs',
-             verbs_row := (lambda s: ('off' if s.settings.get('thinking_verbs') != 'on'
-                                      else f'on, {len(verb_words(s))} words')),
-             group_note('verbs', verbs_row), key='verbs',
+        Item('submenu', 'Thinking verbs', key='verbs',
              help='Rotate the word beside the spinner instead of always saying "working".'),
-        Item('submenu', 'Thinking style',
-             style_row := (lambda s: str(s.settings.get('spinner_style', 'default'))),
-             group_note('style', style_row), key='style',
+        Item('submenu', 'Thinking style', key='style',
              help='The characters the working indicator cycles through, and how fast.'),
-        Item('submenu', 'User message display', switches('usermsg'), group_note('usermsg'),
-             key='usermsg',
+        Item('submenu', 'User message display', key='usermsg',
              help='How your own messages are drawn in the transcript.'),
-        Item('submenu', 'Misc', switches('misc'), group_note('misc'),
-             key='misc',
+        Item('submenu', 'Misc', key='misc',
              help='The switches that belong to no group of their own.'),
-        Item('submenu', 'Toolsets',
-             lambda s: (lambda n: f'{n} saved' if n else 'none saved')(
-                 len(cfg.read_toolsets())),
-             key='toolsets',
+        Item('submenu', 'Toolsets', key='toolsets',
              help='Named lists of disabled tools, applied in one keystroke.'),
-        Item('submenu', 'Subagent models',
-             lambda s: (lambda sec: 'forced' if sec.get('force') is True
-                        else (f"pool of {len(sec.get('models') or {})}"
-                              if sec.get('models') else
-                              (sec.get('default_model') or 'same as the main agent')))(
-                 data.get(cfg.S_SECONDARY) or {}),
-             key='subagent',
+        Item('submenu', 'Subagent models', key='subagent',
              help='Which model a subagent runs on. Needs the secondary-model flag.'),
-        Item('submenu', 'Complexity effort router', switches('router'), group_note('router'),
-             key='router',
+        Item('submenu', 'Complexity effort router', key='router',
              help='Set reasoning effort per turn from the prompt. pin only ever raises it.'),
-        Item('submenu', 'Tool setup',
-             lambda s: f'{len(disabled)} disabled' if disabled else 'none disabled',
-             key='tools',
-             help='Every tool description ships in every request; an unused tool is a per-turn tax.'),
-        Item('submenu', 'AGENTS.md alternative names', switches('agentsmd'),
-             group_note('agentsmd'), key='agentsmd',
-             help='Also read CLAUDE.md and friends. AGENTS.md keeps priority; one file per directory.'),
-        Item('submenu', 'Skill setup',
-             lambda s: ('builtin off' if builtin is False else 'builtin on')
-             + (f', {len(extra)} extra dir(s)' if extra else ''),
-             key='skills',
+        Item('submenu', 'Tool setup', key='tools',
+             help='Every tool description ships in every request; an unused tool is a tax.'),
+        Item('submenu', 'AGENTS.md alternative names', key='agentsmd',
+             help='Also read CLAUDE.md and friends. AGENTS.md keeps priority.'),
+        Item('submenu', 'Skill setup', key='skills',
              help='Kimi\'s own product skills, and where else skills are read from.'),
-        Item('submenu', 'Hook setup',
-             lambda s: (lambda h: f'{len(h)} configured' if h else 'none')(
-                 data.get(cfg.S_HOOKS) if isinstance(data.get(cfg.S_HOOKS), list) else []),
-             key='hooks',
+        Item('submenu', 'Hook setup', key='hooks',
              help='Run a shell command on one of Kimi\'s 20 events.'),
-        Item('submenu', 'Loop control',
-             lambda s: (f"{loop.get(cfg.K_ATTEMPTS, 3)} attempts, "
-                        f"{loop.get(cfg.K_RESERVED, 50000)} reserved"),
-             key='loop',
+        Item('submenu', 'Loop control', key='loop',
              help='Attempts per step, and context held back for the answer.'),
-        Item('submenu', 'Reasoning',
-             lambda s: (lambda t: ', '.join(
-                 ('on' if v is True else 'off' if v is False else str(v))
-                 for v in t.values()) if t else 'Kimi\'s own')(
-                 data.get(cfg.S_THINKING) or {}),
-             key='thinking',
+        Item('submenu', 'Reasoning', key='thinking',
              help='How hard the model thinks, and whether thinking is re-sent.'),
-        Item('submenu', 'Transcript window',
-             lambda s: f'{env_count(s.root)} variable(s) set',
-             key='display',
+        Item('submenu', 'Transcript window', key='display',
              help='How much history is re-sent each turn — the only lever on running cost.'),
-        Item('submenu', 'Patches',
-             lambda s: f'{len(s.patches)} in patches/', key='patches',
+        Item('submenu', 'Patches', key='patches',
              help='The JavaScript patches compiled into the binary.'),
-        Item('action', 'Cost report', lambda s: 'what the prompts weigh', key='cost',
+        Item('action', 'Cost report', key='cost',
              help='Token cost per prompt, and what your edits have saved.'),
-        Item('submenu', 'View system prompts',
-             lambda s: f'{s.prompts_total} files, {s.prompts_edited} edited',
-             key='prompts',
+        Item('submenu', 'View system prompts', key='prompts',
              help='View, price and migrate the overrides in system-prompts/.'),
 
         Item('sep'),
@@ -483,7 +450,7 @@ def reload_state(st: State) -> State:
 SCREEN = m.Screen(build=lambda st: build_items(st), header=header,
                   activate=lambda st, item: activate(st, item),
                   cycle=lambda st, item, fwd: cycle_item(st, item, fwd),
-                  reload=reload_state, help_line=m.HELP_ROOT)
+                  reload=reload_state, inline_help=True, help_line=m.HELP_ROOT)
 
 
 def render(st: State, items: list[Item], cursor: int,
@@ -802,14 +769,20 @@ def value_note(value_fn, at_default_fn, live_note_fn):
     """The note beside a value: `default` when untouched, otherwise why it is
     not in effect yet.
 
-    `waiting for apply` was shown for every patch-backed row, including the
-    ones sitting at their default — where there is nothing to apply, because
-    the patch is a no-op at that value. So the note said "something is
-    pending" about rows where nothing was, and the rows where something
-    genuinely was pending did not stand out from them.
+    Two states are worth telling apart and only two: a row still on Kimi's own
+    value, and a row that is not. The first says `default`; the second says
+    nothing, because the value it is showing *is* what changed. `waiting for
+    apply` said the same thing beside every changed row as the banner says
+    once at the top of the menu, which left the notes carrying no information
+    at all.
     """
     def read(st):
-        return default_note(value_fn(st)) if at_default_fn(st) else live_note_fn(st)
+        if at_default_fn(st):
+            return default_note(value_fn(st))
+        # Changed: the value speaks for itself. Only a patch that is not
+        # there at all is worth a word, because that is a row which cannot
+        # work rather than one that has not been applied yet.
+        return NO_PATCH if live_note_fn(st) == NO_PATCH else ''
     return read
 
 
@@ -1988,6 +1961,84 @@ def _selfcheck() -> int:
             b.unlink()
         config.write_text('default_model = "kimi-code/k3"\n')
 
+        # The real spinner and verb patches are copied in: these screens read
+        # their tables out of the patch rather than keeping a copy, and the
+        # notes below need a switch with a patch actually on disk.
+        for real in (ROOT / 'patches').glob('7[01]-*.js'):
+            shutil.copy(real, root / 'patches' / real.name)
+            os.utime(root / 'patches' / real.name, (1000, 1000))
+
+        # -- what a note says, and what the root menu shows -----------------
+        # Two states, and only two: on Kimi's own value, or not. `waiting for
+        # apply` said the same thing beside every changed row that the banner
+        # says once at the top, which left the notes carrying nothing.
+        settings.write_text('')
+        # The verb rotation is the one switch in this sandbox that has both a
+        # patch on disk and a default that is not the word `default` — so it
+        # is the row where all three states are visible.
+        def verb_note():
+            here = state()
+            value = switch_value('thinking_verbs')
+            note = value_note(value, at_default('thinking_verbs'),
+                              lambda x: x.feature_note(x.patch_file('verbs')))
+            return note(here)
+
+        check('the verb patch is there to be found',
+              state().patch_file('verbs') is not None,
+              [p.name for p in state().patches])
+
+        check('an untouched row says default', verb_note() == 'default', verb_note())
+        ps.set_value('thinking_verbs', 'on', settings)
+        check('a changed row whose patch is installed says nothing at all',
+              verb_note() == '', verb_note())
+        ps.set_value('thinking_verbs', 'off', settings)
+
+        # The one thing still worth a word: a switch with no patch behind it
+        # cannot work however it is set, which is different in kind from one
+        # that has not been applied yet.
+        ps.set_value('read_line_numbers', 'off', settings)
+        misc2 = screen_settings(state(), 'misc')
+        notes = {r.key: r.note(state()) for r in misc2.build(state()) if r.selectable}
+        check('a changed row with no patch behind it still says so',
+              notes.get('read_line_numbers') == NO_PATCH, notes)
+        check('and a row whose value already reads default says nothing',
+              notes.get('read_limits') == '', notes)
+        check('nothing anywhere still says it is waiting',
+              'waiting' not in ' '.join(
+                  str(r.note(state())) for g in SETTING_GROUPS
+                  for r in screen_settings(state(), g).build(state()) if r.selectable))
+        settings.write_text('')
+
+        # The root menu is a list of doors. Every one of them opens a screen
+        # showing the same setting in full, so a summary beside the label is
+        # the same fact twice — and it was what pushed the explanation off
+        # the end of the line.
+        root_items = build_items(state())
+        doors = [i for i in root_items if i.kind == 'submenu']
+        check('no door on the root menu carries a value',
+              all(i.value(state()) == '' for i in doors),
+              [(i.label, i.value(state())) for i in doors if i.value(state())])
+        check('and none carries a note',
+              all(i.note(state()) == '' for i in doors),
+              [(i.label, i.note(state())) for i in doors if i.note(state())])
+        check('every door says what it is for',
+              all(i.help for i in doors), [i.label for i in doors if not i.help])
+        check('the ways out keep theirs',
+              next(i for i in root_items if i.key == 'apply').value(state())
+              == 'run kimi-patch.sh')
+
+        rmap_root: dict[int, int] = {}
+        drawn = m.render(SCREEN, state(), root_items, 0, rmap_root, width=100)
+        check('the explanation is on the selected row',
+              any(l.startswith(CURSOR) and ' - ' in l for l in drawn), drawn[:14])
+        check('and not repeated below the list',
+              not any(l.strip() == doors[0].help for l in drawn), drawn[-4:])
+        # Only the rows: the header carries paths, which are as long as they
+        # are, and wrapping one of those costs nothing. A wrapped *row* would
+        # take two terminal lines where the mouse mapping counts one.
+        long_rows = [drawn[n] for n in rmap_root if m.visible(drawn[n]) > 100]
+        check('no row overflows the window', not long_rows, long_rows)
+
         # -- no row says `default` twice ------------------------------------
         # The note carries that word for every row, so a value that already
         # contains it must not have it appended: `default   [default]` reads
@@ -2041,14 +2092,6 @@ def _selfcheck() -> int:
         # A preview that does not follow the setting is worse than none: it
         # invites a choice made on what it showed. So each is checked against
         # the value it is supposed to be showing, not merely for existing.
-        # The real spinner and verb patches are copied in, because these
-        # screens read their tables out of the patch rather than keeping a
-        # copy — which is the property being checked.
-        import shutil
-        for real in (ROOT / 'patches').glob('7[01]-*.js'):
-            shutil.copy(real, root / 'patches' / real.name)
-            os.utime(root / 'patches' / real.name, (1000, 1000))
-
         settings.write_text('')
         st = state()
         check('the spinner preview falls back to Kimi\'s own frames',
