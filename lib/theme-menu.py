@@ -372,9 +372,18 @@ def screen_tokens(st: ThemeState) -> m.Screen:
     def build(s: ThemeState) -> list[Item]:
         palette = effective(s.theme)
         overrides = s.theme.get('colors', {})
+        in_use = active_theme()
         rows = [Item('info', f'{s.dir / (s.name + ".json")}'),
                 Item('info', f'base: {s.theme.get("base", "dark")}   '
                              f'{len(overrides)} of {len(TOKENS)} tokens overridden')]
+        # Editing a theme that is not the one in use changes a file and
+        # nothing you can see, which reads as the editor not working.
+        if in_use == s.name:
+            rows.append(Item('info', 'in use — Kimi reads it when it starts; '
+                                     '/theme switches a running session'))
+        else:
+            rows.append(Item('info', f'not in use — tui.toml says "{in_use}", so '
+                                     f'nothing here shows up until you switch'))
         if s.message:
             rows.append(Item('info', s.message))
         rows.append(Item('sep'))
@@ -382,6 +391,11 @@ def screen_tokens(st: ThemeState) -> m.Screen:
                          lambda x: x.theme.get('base', 'dark'), key='__base',
                          choices=['dark', 'light'],
                          help='Tokens you do not set fall back to this palette.'))
+        if in_use != s.name:
+            rows.append(Item('action', 'Use this theme',
+                             lambda x: f'tui.toml says "{in_use}"', key='__use',
+                             help='Writes it to tui.toml, so what you change here '
+                                  'is what you see at the next start.'))
         rows.append(Item('sep'))
         for token, what in TOKENS:
             value = palette.get(token, '')
@@ -398,6 +412,11 @@ def screen_tokens(st: ThemeState) -> m.Screen:
         s.message = ''
         if item.key == 'back':
             return False
+        if item.key == '__use':
+            problem = set_active_theme(s.name)
+            s.message = f'not written — {problem}' if problem else \
+                f'tui.toml now says {s.name}'
+            return True
         if item.key.startswith('tok:'):
             token = item.key[4:]
             current = effective(s.theme).get(token, '')
@@ -531,6 +550,43 @@ def screen_themes(st: ThemeState) -> m.Screen:
                     help_line=m.HELP_DEL, title='Themes')
 
 
+# The theme created on demand when a colour is changed from a screen that is
+# not the theme editor. One name, so a second colour changed a week later
+# lands in the same file rather than in a pile of them.
+OURS = 'tweakkimi'
+
+
+def make_theme_to_edit(directory: Path | None = None) -> tuple[str, str]:
+    """A theme that can be written to, creating one if there is none.
+
+    Asking someone to go and set up a theme before they may change a colour
+    is a step they did not ask for and cannot have wanted. So the step is
+    taken for them: a theme of ours over whichever built-in palette is in
+    play, written to `tui.toml` as the one in use. It overrides nothing until
+    a colour is actually changed, so creating it changes how nothing looks.
+
+    Returns the name and a line saying what happened, or an empty name and
+    the reason it could not be done.
+    """
+    name, _ = editable_theme(directory)
+    if name:
+        return name, ''
+    directory = directory or themes_dir()
+    base = 'light' if active_theme() == 'light' else 'dark'
+    made = ''
+    if OURS not in list_themes(directory):
+        try:
+            write_theme({'name': OURS, 'base': base, 'colors': {}}, directory)
+        except OSError as e:
+            return '', f'could not create a theme — {e}'
+        made = f'created {OURS} over {base}'
+    problem = set_active_theme(OURS)
+    if problem:
+        return '', f'created it, but tui.toml not written — {problem}'
+    return OURS, (f'{made} and set it as the theme in use' if made
+                  else f'{OURS} is now the theme in use')
+
+
 def editable_theme(directory: Path | None = None) -> tuple[str, str]:
     """The theme a colour change would land in, and why there might not be one.
 
@@ -564,24 +620,25 @@ def screen_colors(tokens: list[str], title: str,
     def build(s: ThemeState) -> list[Item]:
         name, why = editable_theme(directory)
         rows = [Item('info', 'These are palette tokens: the same values the '
-                             'theme editor writes.')]
-        if why:
-            rows.append(Item('info', why))
+                             'theme editor writes.'),
+                Item('info', 'Kimi reads the theme when it starts; /theme '
+                             'switches a running session.')]
+        # The rows are offered either way. Without a theme of your own there
+        # is nothing to write to *yet*, and the answer to that is to make one
+        # when a colour is actually chosen — not to withhold the rows until
+        # some preparation has been done.
+        rows.append(Item('info', f'changes go to "{name}"' if name
+                         else f'{why}; changing a colour will create "{OURS}" '
+                              f'and use it'))
         if s.message:
             rows.append(Item('info', s.message))
         rows.append(Item('sep'))
-        if not name:
-            rows += [Item('action', 'Make a theme and use it', lambda x: '',
-                          key='create',
-                          help='Copies nothing — a new theme overrides only what '
-                               'you change, over dark or light.'),
-                     Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
-            return rows
 
-        theme = read_theme(name, directory)
+        theme = read_theme(name, directory) if name else \
+            {'name': OURS, 'base': 'light' if active_theme() == 'light' else 'dark',
+             'colors': {}}
         palette = effective(theme)
         overrides = theme.get('colors', {})
-        rows.append(Item('info', f'editing "{name}"'))
         for token in tokens:
             value = palette.get(token, '')
             rows.append(Item(
@@ -608,29 +665,21 @@ def screen_colors(tokens: list[str], title: str,
         s.message = ''
         if item.key == 'back':
             return False
-        if item.key == 'create':
-            name = (_ask('Theme name',
-                         hint='Letters, digits, dot, dash or underscore. It will '
-                              'be written to tui.toml as the one in use.') or '').strip()
-            why = valid_name(name)
-            if why:
-                s.message = f'not created — {why}'
-                return True
-            if not (directory / f'{name}.json').exists():
-                write_theme({'name': name, 'base': 'dark', 'colors': {}}, directory)
-            problem = set_active_theme(name)
-            s.message = f'created, but tui.toml not written — {problem}' if problem \
-                else f'created {name} and set it as the theme in use'
-            return True
         if item.key == 'all':
-            name, _ = editable_theme(directory)
-            if name:
-                inner = ThemeState(directory, name)
-                m.loop(screen_tokens(inner), inner)
+            name, note = make_theme_to_edit(directory)
+            if not name:
+                s.message = note
+                return True
+            inner = ThemeState(directory, name)
+            m.loop(screen_tokens(inner), inner)
             return True
         if item.key.startswith('tok:'):
-            name, _ = editable_theme(directory)
+            # A theme is made here rather than demanded up front. Nothing
+            # about it changes how Kimi looks until the colour below is
+            # written into it.
+            name, note = make_theme_to_edit(directory)
             if not name:
+                s.message = note
                 return True
             token = item.key[4:]
             theme = read_theme(name, directory)
@@ -652,15 +701,15 @@ def screen_colors(tokens: list[str], title: str,
                 return True
             theme.setdefault('colors', {})[token] = raw
             write_theme(theme, directory)
-            s.message = f'{token} = {raw}'
+            s.message = f'{token} = {raw}' + (f' — {note}' if note else '')
         return True
 
     def aside(s: ThemeState, sel=None) -> list[str]:
         name, _ = editable_theme(directory)
-        if not name:
-            return []
+        theme = read_theme(name, directory) if name else \
+            {'base': 'light' if active_theme() == 'light' else 'dark', 'colors': {}}
         token = sel.key[4:] if sel is not None and sel.key.startswith('tok:') else ''
-        return preview(effective(read_theme(name, directory)), token)
+        return preview(effective(theme), token)
 
     return m.Screen(build, activate=act, reload=lambda s: s, aside=aside,
                     help_line=m.HELP_DEL, title=title), state
@@ -838,15 +887,65 @@ def _selfcheck() -> int:
         check('and it previews the theme it is editing',
               any('Preview' in l for l in narrow.aside(nstate)))
 
-        # With nothing editable it says why, and offers the way out rather
-        # than a row that would silently do nothing.
+        # With Kimi's own theme in use the rows are still there — asking
+        # someone to go and set up a theme before they may change a colour is
+        # a step they did not ask for. The screen says what will happen, and
+        # the theme is made when a colour is actually chosen.
         set_active_theme('dark')
         rows_none = narrow.build(nstate)
-        check('with a built-in theme in use there is nothing to edit',
-              not any(r.key.startswith('tok:') for r in rows_none))
-        check('and it offers to make one',
-              any(r.key == 'create' for r in rows_none), [r.key for r in rows_none])
+        check('the token rows are offered even with a built-in theme in use',
+              any(r.key == 'tok:roleUser' for r in rows_none),
+              [r.key for r in rows_none])
+        check('and the screen says what changing one will do',
+              any(r.kind == 'info' and OURS in r.label for r in rows_none),
+              [r.label for r in rows_none if r.kind == 'info'])
+        check('the preview still shows the palette it would start from',
+              any('Preview' in l for l in narrow.aside(nstate)))
+
+        # Making it is the act of changing a colour, not a step before it.
+        name2, note = make_theme_to_edit(d)
+        check('a theme is created on demand', name2 == OURS, (name2, note))
+        check('and put into use', active_theme() == OURS, active_theme())
+        check('it says what it did', 'created' in note and OURS in note, note)
+        check('it overrides nothing to begin with',
+              read_theme(OURS, d)['colors'] == {}, read_theme(OURS, d))
+        again, note2 = make_theme_to_edit(d)
+        check('asking twice reuses it rather than making a second',
+              again == OURS and 'created' not in note2, (again, note2))
+        check('and it takes the base from the palette in play',
+              read_theme(OURS, d)['base'] == 'dark', read_theme(OURS, d)['base'])
+
+        set_active_theme('light')
+        (d / f'{OURS}.json').unlink()
+        make_theme_to_edit(d)
+        check('a light palette in use gives a light base',
+              read_theme(OURS, d)['base'] == 'light', read_theme(OURS, d)['base'])
+        (d / f'{OURS}.json').unlink()
         set_active_theme('midnight')
+
+        # Editing a theme that is not in use changes a file and nothing you
+        # can see, which reads as the editor not working. The screen says so,
+        # and offers the one keystroke that fixes it.
+        set_active_theme('sunset')
+        st_off = ThemeState(d, 'midnight')
+        rows_off = screen_tokens(st_off).build(st_off)
+        check('a theme that is not in use says so',
+              any(r.kind == 'info' and 'not in use' in r.label for r in rows_off),
+              [r.label for r in rows_off if r.kind == 'info'])
+        check('and offers to switch to it',
+              any(r.key == '__use' for r in rows_off))
+        m.handle(screen_tokens(st_off), st_off, rows_off,
+                 next(i for i, r in enumerate(rows_off) if r.key == '__use'), 'enter')
+        check('which writes tui.toml', active_theme() == 'midnight', active_theme())
+
+        rows_on = screen_tokens(st_off).build(st_off)
+        check('the theme in use says that instead',
+              any(r.kind == 'info' and 'in use —' in r.label for r in rows_on),
+              [r.label for r in rows_on if r.kind == 'info'])
+        check('and has nothing to switch to',
+              not any(r.key == '__use' for r in rows_on))
+        check('it also says when the change takes effect',
+              any('starts' in r.label for r in rows_on if r.kind == 'info'))
 
         # Every token has to draw something in the preview, or it is one you
         # can only change blind — pick a colour, look, and see nothing move.

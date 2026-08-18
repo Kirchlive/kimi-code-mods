@@ -198,11 +198,21 @@ selecting it marks the frame.
 Every colour in Kimi comes from the palette, so the screens whose look depends
 on one — your own messages, the spinner, the composer frame — carry a
 **Colours** row that opens those tokens rather than offering a second place to
-set the same value. That needs a theme of your own that is also the one in
-use; when there is not one, the screen says so and offers to make it. Which
-theme is in use lives in `~/.kimi-code/tui.toml`, not `config.toml` — Kimi
-splits its settings and says so in the file it writes — and the theme list
-both shows it and can change it.
+set the same value.
+
+Writing to a palette needs a theme of your own that is also the one in use,
+and out of the box neither is true: Kimi ships set to `auto`, which is built
+in. Rather than withhold the rows until that has been sorted out, the screen
+says what will happen and does it when a colour is actually chosen — a theme
+called `tweakkimi` over whichever built-in palette is in play, written to
+`tui.toml` as the one in use. It overrides nothing until the colour lands in
+it, so creating it changes how nothing looks.
+
+Which theme is in use lives in `~/.kimi-code/tui.toml`, not `config.toml` —
+Kimi splits its settings and says so in the file it writes. The theme list
+shows it and can change it, and the editor says whether the theme open in
+front of you is the one you will see, because editing any other one changes a
+file and nothing else.
 
 **Screens that configure something visual show it.** Themes, the spinner, the
 rotating verb and your own message frame each draw a preview beside the rows —
