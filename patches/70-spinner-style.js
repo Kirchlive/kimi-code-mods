@@ -50,7 +50,20 @@
 //   dots     ⣾⣽⣻… a heavier braille cycle
 //   moon     🌑🌒🌓… everywhere, including the composing spinner
 //   blocks   ▏▎▍… a bar that fills and restarts
+//   wave     ▁▃▄▅▆▇█ a column that grows
+//   glow     ░▒▓█ four densities
+//   colors   🔴🟠🟡🟢🔵🟣 double-width, like the moon set
+//   arc      ◜◠◝◞◡◟ a ring drawn in quarters
+//   star     ·✢✳✶✻✽ the shape Claude Code uses
 //   mirror   keep Kimi's frames but run them forwards, then backwards
+//   custom   the frames in `spinner_frames`
+//
+// `spinner_frames` is only read by `custom`. Frames are separated by spaces
+// where there are any, and taken one code point at a time where there are not
+// — so `⠋ ⠙ ⠹` and `⠋⠙⠹` mean the same thing, and a frame made of several code
+// points (a flag, an emoji with a modifier) is still expressible by separating
+// with spaces. Fewer than two frames is refused: a spinner that never changes
+// is a character, and there are quieter ways to draw one.
 //
 // `spinner_interval_ms`: `default` keeps 120 ms for moon and 80 ms for braille,
 // or a number from 20 to 2000 that both styles then use. A value outside that
@@ -60,17 +73,45 @@
 
 const STYLE = String(settings.get('spinner_style', 'default')).toLowerCase();
 const RATE = String(settings.get('spinner_interval_ms', 'default')).toLowerCase();
+const FRAMES_SETTING = String(settings.get('spinner_frames', 'default'));
 
 const PRESETS = {
   braille: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
   dots: ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'],
   moon: ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'],
   blocks: ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'],
+  wave: ['▁', '▃', '▄', '▅', '▆', '▇', '█', '▇', '▆', '▅', '▄', '▃'],
+  glow: ['░', '▒', '▓', '█', '▓', '▒'],
+  colors: ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣'],
+  arc: ['◜', '◠', '◝', '◞', '◡', '◟'],
+  star: ['·', '✢', '✳', '✶', '✻', '✽'],
 };
 
-const CHOICES = ['default', 'mirror'].concat(Object.keys(PRESETS));
+// Exported for the menu, which draws each preset next to its name so the
+// choice is made by looking rather than by reading a word. Kept as one table
+// here so the two cannot drift: a preset the menu offers and the patch does
+// not know would be a row that fails when it is applied.
+function kimiModsSpinnerFrames(setting) {
+  const raw = String(setting);
+  const parts = raw.trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts : Array.from(raw.trim());
+}
+
+const CHOICES = ['default', 'mirror', 'custom'].concat(Object.keys(PRESETS));
 if (!CHOICES.includes(STYLE)) {
   throw new Error(`spinner_style must be one of ${CHOICES.join(', ')} - got "${STYLE}"`);
+}
+
+let custom = null;
+if (STYLE === 'custom') {
+  if (FRAMES_SETTING === 'default' || !FRAMES_SETTING.trim()) {
+    throw new Error('spinner_style is custom but spinner_frames is empty - '
+      + 'set the frames, or pick a preset');
+  }
+  custom = kimiModsSpinnerFrames(FRAMES_SETTING);
+  if (custom.length < 2) {
+    throw new Error(`spinner_frames needs at least two frames - got ${custom.length}`);
+  }
 }
 
 let ms = null;
@@ -140,7 +181,7 @@ for (const name of ['BRAILLE_SPINNER_FRAMES', 'MOON_SPINNER_FRAMES']) {
   const found = readFrames(name);
   const wanted = STYLE === 'mirror'
     ? (isMirrored(found.list) ? found.list : found.list.concat([...found.list].reverse()))
-    : PRESETS[STYLE];
+    : (STYLE === 'custom' ? custom : PRESETS[STYLE]);
   const replacement = writeFrames(name, wanted);
   if (replacement === found.text) continue;
   out = out.replace(found.text, () => replacement);

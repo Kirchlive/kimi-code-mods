@@ -22,7 +22,10 @@ Nothing here needs a terminal to be tested. `handle` takes a decoded key or a
 can be exercised without a TTY.
 """
 
+import os
+import re
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -68,8 +71,9 @@ def paint(text: str, style: str, on: bool) -> str:
 
 # The one line at the bottom of every screen. A submenu adds "esc back",
 # because that is the only key whose meaning differs between the two.
-HELP_ROOT = '  ↑↓ or wheel move · enter or click open · ‹› change · q quit'
-HELP_SUB = '  ↑↓ or wheel move · enter or click open · ‹› change · esc back'
+HELP_ROOT = '  ↑↓/wheel move · enter open · ‹› change · q quit'
+HELP_SUB = '  ↑↓/wheel move · enter open · ‹› change · esc back'
+HELP_DEL = '  ↑↓/wheel move · enter open · ‹› change · ⌫ remove · esc back'
 
 
 class Item:
@@ -84,7 +88,8 @@ class Item:
     """
 
     def __init__(self, kind, label='', value=lambda st: '', note=lambda st: '',
-                 key='', choices=None, on_cycle=None, on_enter=None, help=''):
+                 key='', choices=None, on_cycle=None, on_enter=None,
+                 on_delete=None, help=''):
         self.kind = kind
         self.label = label
         self.value = value
@@ -93,6 +98,13 @@ class Item:
         self.choices = choices or []
         self.on_cycle = on_cycle
         self.on_enter = on_enter
+        # Backspace removes what the row stands for — a saved set, a hook, a
+        # value handed back to Kimi. It used to be ‹›, which is the key that
+        # *changes* a value everywhere else in this menu; a user stepping
+        # through a list to look at it deleted an entry instead. One key, one
+        # meaning, and the destructive one is the key that already means
+        # "remove" on every keyboard.
+        self.on_delete = on_delete
         self.help = help
 
     @property
@@ -116,12 +128,15 @@ class Screen:
     """
 
     def __init__(self, build, header=None, activate=None, cycle=None,
-                 reload=None, help_line=HELP_SUB, title=''):
+                 reload=None, delete=None, aside=None, help_line=HELP_SUB,
+                 title=''):
         self.build = build
         self._header = header
         self._activate = activate
         self._cycle = cycle
         self._reload = reload
+        self._delete = delete
+        self._aside = aside
         self.help_line = help_line
         self.title = title
 
@@ -149,6 +164,25 @@ class Screen:
     def reload(self, st):
         return self._reload(st) if self._reload is not None else st
 
+    def aside(self, st) -> list[str]:
+        """A preview drawn beside the rows, tweakcc's second column.
+
+        A colour, a spinner and a message frame are things you judge by
+        looking at them, and a list of names is not a substitute for that.
+        Rows and preview are rendered together so the two cannot disagree
+        about the state they are both describing.
+        """
+        return list(self._aside(st)) if self._aside is not None else []
+
+    def delete(self, st, item) -> bool:
+        """Remove what a row stands for. False when the row has nothing to remove."""
+        if item.on_delete is not None:
+            item.on_delete(st, item)
+            return True
+        if self._delete is not None:
+            return self._delete(st, item) is not False
+        return False
+
 
 # --------------------------------------------------------------------------
 # rendering
@@ -156,8 +190,14 @@ class Screen:
 
 
 def render(screen: Screen, st, items: list[Item], cursor: int,
-           row_map: dict | None = None, color: bool = False) -> list[str]:
-    """The screen as lines, recording which line each row landed on."""
+           row_map: dict | None = None, color: bool = False,
+           width: int | None = None) -> list[str]:
+    """The screen as lines, recording which line each row landed on.
+
+    A preview, when the screen has one, is appended to the same lines rather
+    than printed separately: a click's row is an index into what was printed,
+    so anything that adds lines has to go through here to be counted.
+    """
     lines = list(screen.header(st))
     lines.append('')
 
@@ -185,7 +225,61 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
         lines.append(paint(f'  {sel.help}', DIM, color))
         lines.append('')
     lines.append(paint(screen.help_line, DIM, color))
-    return lines
+    return beside(lines, screen.aside(st), width)
+
+
+ANSI = re.compile(r'\x1b\[[0-9;]*m')
+ASIDE_GAP = 3
+
+
+def visible(text: str) -> int:
+    """How wide a line actually prints.
+
+    Two things make this more than `len`. Colour codes take no columns at
+    all, and a wide character — an emoji, a CJK glyph — takes two. Getting
+    either wrong shifts the right-hand edge of a framed preview by exactly
+    the number of them in the line, which is how a box ends up ragged.
+    """
+    plain = ANSI.sub('', text)
+    return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1
+               for c in plain)
+
+
+def terminal_width(fallback: int = 100) -> int:
+    try:
+        return os.get_terminal_size().columns
+    except OSError:
+        return fallback
+
+
+def beside(lines: list[str], aside: list[str], width: int | None = None) -> list[str]:
+    """Put `aside` to the right of `lines`, or under them when it will not fit.
+
+    Two rules decide it, and both are about not making the screen worse than
+    it was. The preview only goes beside the rows when the window is wide
+    enough for both without wrapping — a wrapped line would occupy two
+    terminal rows, and the mouse mapping counts one. And it never lengthens
+    the block it is added to beyond what the rows already need, except where
+    the preview itself is the taller of the two.
+    """
+    if not aside:
+        return lines
+    left = max((visible(l) for l in lines), default=0)
+    right = max((visible(a) for a in aside), default=0)
+    if width is None:
+        width = terminal_width()
+    if left + ASIDE_GAP + right > width:
+        # Too narrow to sit beside: below, separated by a blank line, where it
+        # costs height rather than correctness.
+        return lines + [''] + aside
+
+    out = []
+    for i in range(max(len(lines), len(aside))):
+        row = lines[i] if i < len(lines) else ''
+        pad = ' ' * (left - visible(row) + ASIDE_GAP)
+        extra = aside[i] if i < len(aside) else ''
+        out.append((row + pad + extra).rstrip() if extra else row)
+    return out
 
 
 def draw(screen: Screen, st, items: list[Item], cursor: int) -> dict:
@@ -201,7 +295,7 @@ def draw(screen: Screen, st, items: list[Item], cursor: int) -> dict:
         sys.stdout.write(HIDE_CURSOR)
     row_map: dict[int, int] = {}
     print('\n'.join(render(screen, st, items, cursor, row_map,
-                           color=sys.stdout.isatty())))
+                           color=sys.stdout.isatty(), width=terminal_width())))
     sys.stdout.flush()
     return row_map
 
@@ -211,6 +305,126 @@ def show_cursor() -> None:
     if sys.stdout.isatty():
         sys.stdout.write(SHOW_CURSOR)
         sys.stdout.flush()
+
+
+# --------------------------------------------------------------------------
+# typed values
+# --------------------------------------------------------------------------
+
+FIELD_WIDTH = 46
+
+
+def field(title: str, value: str = '', hint: str = '', width: int = FIELD_WIDTH):
+    """Read one line in a bordered field, and return it — or None on escape.
+
+    This exists because `input()` cannot be used here, and the reason is not
+    stylistic. `input()` reads a line in cooked mode, so an arrow key pressed
+    out of habit arrives as the three bytes of its escape sequence *inside the
+    returned string*. That string was then written to `config.toml`, where
+    `\\x1b` is not a legal character, and the next parse of the file threw —
+    out of a menu that had already redrawn, with a traceback in place of the
+    screen. Not hypothetical: that is how it crashed.
+
+    Here every key arrives decoded. An arrow key is a key rather than text and
+    is simply ignored, so it cannot reach the value; backspace deletes; enter
+    accepts; escape returns None, which every caller reads as "nothing was
+    entered" and leaves the setting alone.
+
+    Without a terminal it returns None immediately rather than blocking, the
+    same rule `loop` follows.
+    """
+    if not sys.stdin.isatty():
+        return None
+    text = value
+    color = sys.stdout.isatty()
+    inner = width - 2
+    try:
+        while True:
+            sys.stdout.write('\x1b[2J\x1b[H')
+            if color:
+                sys.stdout.write(HIDE_CURSOR)
+            shown = text[-inner:] if len(text) > inner else text
+            lines = ['', ' ' + title, '']
+            if hint:
+                lines += [paint('  ' + hint, DIM, color), '']
+            lines += ['  ╭' + '─' * width + '╮',
+                      '  │ ' + (shown + '▋').ljust(inner)[:inner] + ' │',
+                      '  ╰' + '─' * width + '╯', '',
+                      paint('  enter saves · backspace deletes · esc cancels',
+                            DIM, color)]
+            print('\n'.join(lines))
+            sys.stdout.flush()
+
+            with raw_mode():
+                key = read_key()
+            if key == 'enter':
+                return text
+            if key in ('esc', 'ctrl-c', 'eof'):
+                return None
+            if key == 'backspace':
+                text = text[:-1]
+                continue
+            # Anything that is a key rather than a character is navigation,
+            # and navigation has no meaning in a one-line field.
+            if isinstance(key, Mouse) or len(key) != 1 or not key.isprintable():
+                continue
+            text += key
+    finally:
+        show_cursor()
+
+
+def pick(title: str, options: list[str], hint: str = '', note=None):
+    """Choose one of `options` on a screen of its own. `None` if cancelled.
+
+    A list the program already holds has no business being typed. Every place
+    that used to print a numbered list and read the number back — the twenty
+    hook events, the models in a pool — is one of these instead, so the answer
+    cannot be misspelled and there is nothing to validate afterwards.
+
+    `note(option)` supplies the second column, where an option has more to say
+    about itself than its name.
+    """
+    chosen = None
+
+    def build(_st) -> list[Item]:
+        rows: list[Item] = []
+        if hint:
+            rows += [Item('info', hint), Item('sep')]
+        for opt in options:
+            rows.append(Item('action', opt,
+                             (lambda o: lambda _s: note(o) if note else '')(opt),
+                             key=f'pick:{opt}'))
+        if not options:
+            rows.append(Item('info', 'nothing to choose from'))
+        rows += [Item('sep'), Item('action', 'Cancel', key='cancel')]
+        return rows
+
+    def act(_st, item: Item) -> bool:
+        nonlocal chosen
+        if item.key.startswith('pick:'):
+            chosen = item.key[5:]
+        return False
+
+    loop(Screen(build, activate=act, title=title), None)
+    return chosen
+
+
+def press_any(message: str = '') -> None:
+    """Say something the next repaint would wipe out, and wait for a key.
+
+    A key rather than a line: there is nothing to type, and asking for enter
+    through `input()` is the same cooked-mode reader this module exists to
+    keep away from the terminal.
+    """
+    color = sys.stdout.isatty()
+    if message:
+        print(message)
+    if not sys.stdin.isatty():
+        return
+    print(paint('\n  press any key ', DIM, color))
+    sys.stdout.flush()
+    with raw_mode():
+        read_key()
 
 
 # --------------------------------------------------------------------------
@@ -283,9 +497,12 @@ def handle(screen: Screen, st, items: list[Item], cursor: int, key,
 
     item = items[cursor] if 0 <= cursor < len(items) else None
 
+    if key == 'backspace' and item is not None:
+        return cursor, True, screen.delete(st, item)
+
     # ‹› adjusts, enter opens. A `cycle` row adjusts by definition; any other
     # row may opt in by carrying an `on_cycle`, which is how a row that asks
-    # for a typed value on enter can still be cleared with an arrow key.
+    # for a typed value on enter can still be adjusted with an arrow key.
     if key in ('left', 'right') and item is not None \
             and (item.kind == 'cycle' or item.on_cycle is not None):
         screen.cycle(st, item, key == 'right')
@@ -539,6 +756,51 @@ def _selfcheck() -> int:
     check('click bytes decode to a Mouse', isinstance(ev, Mouse), ev)
     pos5, _, _ = handle(screen, store, items, 0, ev, row_map)
     check('decoded click reaches the row', pos5 == idx, pos5)
+
+    # -- the second column -------------------------------------------------
+    # A preview is part of the same lines as the rows, so a click still lands
+    # where it looks like it should. Both halves of that matter: the columns
+    # have to line up, and the mapping has to survive the padding.
+    wide = Screen(build, activate=activate, cycle=cycle, title='with a preview',
+                  aside=lambda st: ['┌────┐', '│ ab │', '└────┘'])
+    rows_w = wide.build(store)
+    map_w: dict[int, int] = {}
+    out_w = render(wide, store, rows_w, 0, map_w, width=200)
+    starts = {visible(l[:l.index('│')]) for l in out_w if '│' in l}
+    check('the preview starts in one column', len(starts) == 1, starts)
+    check('the rows are still mapped',
+          len(map_w) == len([i for i in rows_w if i.selectable]), len(map_w))
+    for line_no, item_idx in map_w.items():
+        check('a mapped line still holds its row',
+              rows_w[item_idx].label in out_w[line_no], out_w[line_no])
+
+    # Too narrow to sit beside, so it goes underneath rather than wrapping —
+    # a wrapped line would take two terminal rows and the mapping counts one.
+    narrow = render(wide, store, rows_w, 0, None, width=20)
+    check('a narrow window puts the preview below',
+          narrow[-1] == '└────┘', narrow[-3:])
+    check('and nothing is beside the rows there',
+          not any('│' in l and 'Colour' in l for l in narrow))
+
+    check('a wide character counts as two columns', visible('🌕') == 2)
+    check('colour codes count as none', visible(f'{DIM}ab{RESET}') == 2)
+    check('an empty aside changes nothing',
+          beside(['a', 'b'], []) == ['a', 'b'])
+
+    # -- backspace removes ---------------------------------------------------
+    removed = []
+    del_row = Item('action', 'Removable', key='rm',
+                   on_delete=lambda st, it: removed.append(it.key))
+    rows_d = [del_row]
+    screen_d = Screen(lambda st: rows_d)
+    _, keep_d, reload_d = handle(screen_d, store, rows_d, 0, 'backspace')
+    check('backspace runs the row\'s delete', removed == ['rm'], removed)
+    check('and asks for a reload', reload_d and keep_d)
+
+    plain_row = [Item('action', 'Nothing to remove', key='x')]
+    screen_p = Screen(lambda st: plain_row)
+    _, _, reload_p = handle(screen_p, store, plain_row, 0, 'backspace')
+    check('backspace on a row with nothing to remove is inert', not reload_p)
 
     # -- a screen with no header still renders -----------------------------
     bare = Screen(lambda st: [Item('action', 'Only', key='only')])

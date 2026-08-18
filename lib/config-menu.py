@@ -106,6 +106,20 @@ KIMI_DEFAULTS = {
     K_RESERVED: 50000,
 }
 
+# The values worth stepping through for the two loop numbers. Kimi's own
+# defaults are in the list, so ‹› always passes back through them.
+LOOP_STEPS = {
+    K_ATTEMPTS: [1, 2, 3, 4, 5, 8, 10],
+    K_RESERVED: [10000, 25000, 50000, 75000, 100000, 150000, 200000],
+}
+
+# The timeouts worth offering for a hook. Kimi's own is the first choice, so
+# the list covers the whole range without a number ever being typed.
+HOOK_TIMEOUTS = [5, 10, 30, 60, 120, 300, 600]
+
+# `keep` is a two-value setting in the engine, not free text.
+KEEP_MODES = ['all', 'off']
+
 # What the menu marks as recommended. One place, one line each, so a changed
 # opinion is a one-line change. `None` means we deliberately have no opinion
 # and let Kimi's own default stand — currently the case for merging skill
@@ -492,27 +506,25 @@ def validate(path: Path) -> tuple[bool, str]:
 # Menu
 # --------------------------------------------------------------------------
 
-def ask(prompt: str) -> str:
-    """One line of free text, for the few values no list can offer.
+def ask(title: str, value: str = '', hint: str = ''):
+    """One typed value, in a field. `None` means the user changed their mind.
 
-    A path and a number cannot be picked from a list, so those two prompts
-    stay. Everything else is a row now. Wrapped so a closed stdin — the state
-    every smoke test and `--dry-run` runs in — reads as "nothing entered"
-    rather than as an exception thrown out of a menu row.
+    Never `input()`. A line read in cooked mode takes an arrow key as the
+    three bytes of its escape sequence and hands them back inside the string;
+    that string was written to `config.toml`, and the next parse threw
+    `Illegal character '\\x1b'` out of a menu that had already redrawn. The
+    field in `menu.py` reads decoded keys, so navigation cannot become text.
+
+    `None` and `''` are different answers and callers have to keep them apart:
+    escape means leave the setting alone, an empty field means the user
+    cleared it on purpose.
     """
-    try:
-        return input(prompt).strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return ''
+    return m.field(title, value, hint)
 
 
 def pause(*lines: str) -> None:
     """Say something the next repaint would otherwise wipe out."""
-    print()
-    for line in lines:
-        print(line)
-    ask('\n   [enter] back ')
+    m.press_any('\n' + '\n'.join(lines))
 
 
 def fmt_state(value, explicit: bool) -> str:
@@ -712,7 +724,8 @@ def screen_extra_dirs(st: Editing) -> m.Screen:
         for d in dirs:
             items.append(Item('action', d,
                               (lambda p: lambda x: state_of(p))(d),
-                              key=f'drop:{d}', help='enter removes it'))
+                              key=f'dir:{d}', on_delete=drop,
+                              help='backspace removes it'))
         if not dirs:
             items.append(Item('info', 'none configured'))
         items += [
@@ -722,6 +735,11 @@ def screen_extra_dirs(st: Editing) -> m.Screen:
             Item('action', 'Back', lambda x: 'discard the changes', key='back'),
         ]
         return items
+
+    def drop(s: Editing, item: Item) -> None:
+        d = item.key[4:]
+        if d in dirs:
+            dirs.remove(d)
 
     def act(s: Editing, item: Item) -> bool:
         if item.key == 'back':
@@ -733,17 +751,14 @@ def screen_extra_dirs(st: Editing) -> m.Screen:
                 s.doc.remove('', K_EXTRA_SKILL_DIRS)
             return False
         if item.key == 'add':
-            raw = ask('   path: ')
+            raw = ask('Extra skill directory',
+                      hint='An absolute path, `~/…`, or one relative to the project root.')
             if raw and raw not in dirs:
                 dirs.append(raw)
-        elif item.key.startswith('drop:'):
-            d = item.key[5:]
-            if d in dirs:
-                dirs.remove(d)
         return True
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
-                    title='Extra skill directories')
+                    help_line=m.HELP_DEL, title='Extra skill directories')
 
 
 def screen_loop(st: Editing) -> m.Screen:
@@ -757,7 +772,7 @@ def screen_loop(st: Editing) -> m.Screen:
     """
     message = ''
 
-    def reset(s: Editing, item: Item, forward: bool) -> None:
+    def reset(s: Editing, item: Item) -> None:
         key = item.key[4:]
         nonlocal message
         s.doc.remove(S_LOOP, key)
@@ -773,10 +788,37 @@ def screen_loop(st: Editing) -> m.Screen:
         for key in (K_ATTEMPTS, K_RESERVED):
             rows.append(Item('action', key,
                              (lambda k: lambda x: fmt_state(*shown(x.data, k, S_LOOP)))(key),
-                             key=f'num:{key}', on_cycle=reset,
-                             help='enter sets it, ‹› hands it back to Kimi'))
+                             key=f'num:{key}', on_cycle=step_number,
+                             on_delete=reset,
+                             help='‹› steps through the usual values, enter types '
+                                  'one, backspace hands it back to Kimi'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
+
+    def write(s: Editing, key: str, value: int) -> None:
+        nonlocal message
+        s.doc.set(S_LOOP, key, lit(value))
+        message = f'{key} = {value}'
+
+    def step_number(s: Editing, item: Item, forward: bool) -> None:
+        """‹› walks the values worth having, so neither needs typing.
+
+        Both settings are numbers with a small useful range, and every number
+        in between is either the same in practice or a mistake. A list of the
+        ones worth choosing removes the typing for the ordinary case; enter
+        still opens a field for the case the list does not cover.
+        """
+        nonlocal message
+        message = ''
+        s.refresh()
+        key = item.key[4:]
+        steps = LOOP_STEPS[key]
+        cur = shown(s.data, key, S_LOOP)[0]
+        try:
+            i = steps.index(int(cur))
+        except (ValueError, TypeError):
+            i = 0
+        write(s, key, steps[(i + (1 if forward else -1)) % len(steps)])
 
     def act(s: Editing, item: Item) -> bool:
         nonlocal message
@@ -786,16 +828,18 @@ def screen_loop(st: Editing) -> m.Screen:
         if item.key.startswith('num:'):
             key = item.key[4:]
             cur = shown(s.data, key, S_LOOP)[0]
-            raw = ask(f'   {key} [{cur}] (enter keeps it): ')
+            raw = ask(key, str(cur) if cur is not None else '',
+                      hint='A whole number. Escape leaves it as it is.')
+            if raw is None or raw == '':
+                return True
             if raw.isdigit():
-                s.doc.set(S_LOOP, key, lit(int(raw)))
-                message = f'{key} = {raw}'
-            elif raw:
+                write(s, key, int(raw))
+            else:
                 message = f'not written — {raw!r} is not a number'
         return True
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
-                    title='Loop control')
+                    help_line=m.HELP_DEL, title='Loop control')
 
 
 def screen_hooks(st: Editing) -> m.Screen:
@@ -824,7 +868,7 @@ def screen_hooks(st: Editing) -> m.Screen:
         value = s.data.get(S_HOOKS)
         return [h for h in value if isinstance(h, dict)] if isinstance(value, list) else []
 
-    def drop(s: Editing, item: Item, forward: bool) -> None:
+    def drop(s: Editing, item: Item) -> None:
         nonlocal message
         idx = int(item.key.split(':', 1)[1])
         message = ('deleted' if s.doc.remove_table(S_HOOKS, idx)
@@ -846,8 +890,8 @@ def screen_hooks(st: Editing) -> m.Screen:
             command = str(hook.get('command', ''))
             rows.append(Item('action', event,
                              (lambda c: lambda x: (c[:44] + '…') if len(c) > 45 else c)(command),
-                             key=f'hook:{i}', on_cycle=drop,
-                             help='enter replaces the command, ‹› deletes the hook'))
+                             key=f'hook:{i}', on_delete=drop,
+                             help='enter replaces the command, backspace deletes the hook'))
         if not hooks:
             rows.append(Item('info', 'none configured'))
         rows += [Item('sep'),
@@ -863,31 +907,28 @@ def screen_hooks(st: Editing) -> m.Screen:
             return False
 
         if item.key == 'add':
-            print()
-            for i, name in enumerate(HOOK_EVENTS, 1):
-                print(f'   {i:>2}  {name}')
-            raw = ask('   event (number or name): ').strip()
-            event = ''
-            if raw.isdigit() and 1 <= int(raw) <= len(HOOK_EVENTS):
-                event = HOOK_EVENTS[int(raw) - 1]
-            elif raw in HOOK_EVENTS:
-                event = raw
+            # The twenty events are a list this program already holds, so it
+            # is chosen from rather than typed. Nothing to misspell, and
+            # nothing left to validate afterwards.
+            event = m.pick('Hook event', HOOK_EVENTS,
+                           hint='Which of Kimi\'s events runs the command.',
+                           note=lambda e: 'seen working' if e == 'SessionStart' else '')
             if not event:
-                message = f'not added — "{raw}" is not one of the {len(HOOK_EVENTS)} events'
+                message = 'not added — no event chosen'
                 return True
-            command = ask('   command: ').strip()
+            command = (ask('Command', hint=f'The shell command run on {event}.')
+                       or '').strip()
             if not command:
                 message = 'not added — a hook without a command does nothing'
                 return True
             pairs = [('event', lit(event)), ('command', lit(command))]
-            matcher = ask('   matcher (optional, enter to skip): ').strip()
+            matcher = (ask('Matcher', hint='Optional. Leave empty to run on every '
+                                           'occurrence of the event.') or '').strip()
             if matcher:
                 pairs.append(('matcher', lit(matcher)))
-            timeout = ask('   timeout in seconds (1-600, enter for Kimi\'s own): ').strip()
-            if timeout:
-                if not timeout.isdigit() or not 1 <= int(timeout) <= 600:
-                    message = f'not added — timeout must be 1 to 600, got "{timeout}"'
-                    return True
+            timeout = m.pick('Timeout', ['Kimi\'s own'] + [str(t) for t in HOOK_TIMEOUTS],
+                             hint='How long the command may run before it is given up on.')
+            if timeout and timeout.isdigit():
                 pairs.append(('timeout', lit(int(timeout))))
             s.doc.append_table(S_HOOKS, pairs)
             message = f'added a {event} hook'
@@ -899,7 +940,9 @@ def screen_hooks(st: Editing) -> m.Screen:
             if not 0 <= idx < len(hooks):
                 return True
             current = str(hooks[idx].get('command', ''))
-            raw = ask(f'   command [{current}] (enter keeps it): ').strip()
+            raw = (ask('Command', current,
+                       hint=f'What {hooks[idx].get("event", "this event")} runs. '
+                            'Escape leaves it as it is.') or '').strip()
             if not raw:
                 return True
             # The block is rewritten rather than edited in place: `set` cannot
@@ -916,7 +959,7 @@ def screen_hooks(st: Editing) -> m.Screen:
         return True
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
-                    title='Event hooks')
+                    help_line=m.HELP_DEL, title='Event hooks')
 
 
 def subagent_rules(section: dict, subagent_flag_on: bool) -> list[str]:
@@ -989,11 +1032,24 @@ def screen_subagent(st: Editing) -> m.Screen:
         exp = s.data.get('experimental') or {}
         return exp.get('secondary_model') is True or exp.get('secondaryModel') is True
 
-    def reset(s: Editing, item: Item, forward: bool) -> None:
+    def reset(s: Editing, item: Item) -> None:
         nonlocal message
         key = item.key.split(':', 1)[1]
         s.doc.remove(S_SECONDARY, key)
         message = f'{key} back to Kimi\'s default'
+
+    def drop_model(s: Editing, item: Item) -> None:
+        nonlocal message
+        alias = item.key.split(':', 1)[1]
+        section = dict(s.data.get(S_SECONDARY) or {})
+        models = dict(section.get(K_SM_MODELS) or {})
+        if models.pop(alias, None) is None:
+            return
+        if models:
+            s.doc.set(S_SECONDARY, K_SM_MODELS, lit(models))
+        else:
+            s.doc.remove(S_SECONDARY, K_SM_MODELS)
+        message = f'removed "{alias}" from the pool'
 
     def build(s: Editing) -> list[Item]:
         section = s.data.get(S_SECONDARY) or {}
@@ -1014,17 +1070,21 @@ def screen_subagent(st: Editing) -> m.Screen:
                               'the choice. Cannot be combined with a pool.'))
         rows.append(Item('action', K_SM_DEFAULT,
                          lambda x: fmt_state(*shown(x.data, K_SM_DEFAULT, S_SECONDARY)),
-                         key=f'txt:{K_SM_DEFAULT}', on_cycle=reset,
+                         key=f'txt:{K_SM_DEFAULT}', on_delete=reset,
                          help='The model used unless the main agent picks another. '
                               'Must be one of the pool entries when a pool exists.'))
-        rows.append(Item('info', f'pool: {len(models)} model(s)'
-                                 + (f' — {", ".join(sorted(models))}' if models else '')))
+        rows.append(Item('info', f'pool: {len(models)} model(s)'))
+        # Each pool entry is a row of its own, so removing one is backspace on
+        # the thing being removed rather than typing its name back at a
+        # prompt that then has to tell you it did not match.
+        for alias in sorted(models):
+            rows.append(Item('action', f'  {alias}',
+                             (lambda a: lambda x: str(models.get(a) or ''))(alias),
+                             key=f'model:{alias}', on_delete=drop_model,
+                             help='backspace removes it from the pool'))
         rows.append(Item('action', 'Add a pool model', lambda x: '', key='pool:add',
                          help='An alias from your model catalogue, plus a short '
                               'description the main agent sees.'))
-        if models:
-            rows.append(Item('action', 'Remove a pool model', lambda x: '',
-                             key='pool:remove'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -1039,23 +1099,28 @@ def screen_subagent(st: Editing) -> m.Screen:
         if item.key.startswith('txt:'):
             key = item.key[4:]
             cur = shown(s.data, key, S_SECONDARY)[0]
-            raw = ask(f'   {key} [{cur}] (enter keeps it): ').strip()
+            # With a pool, the value has to be one of its entries — so it is
+            # picked from them. Without one there is nothing to pick from and
+            # the field is the only honest option.
+            if models:
+                raw = m.pick(key, sorted(models),
+                             hint='Must name one of the pool entries.',
+                             note=lambda a: str(models.get(a) or ''))
+            else:
+                raw = ask(key, str(cur) if cur is not None else '',
+                          hint='An alias from your model catalogue.')
             if not raw:
                 return True
-            section[key] = raw
+            section[key] = raw.strip()
         elif item.key == 'pool:add':
-            alias = ask('   model alias: ').strip()
+            alias = (ask('Model alias',
+                         hint='As it appears in your model catalogue.') or '').strip()
             if not alias:
                 return True
-            note = ask('   what it is good for: ').strip()
+            note = (ask('What it is good for',
+                        hint=f'One line the main agent sees when choosing {alias}.')
+                    or '').strip()
             models[alias] = note
-            section[K_SM_MODELS] = models
-        elif item.key == 'pool:remove':
-            alias = ask(f'   which of {", ".join(sorted(models))}: ').strip()
-            if alias not in models:
-                message = f'not removed — "{alias}" is not in the pool'
-                return True
-            models.pop(alias)
             section[K_SM_MODELS] = models
 
         # Kimi's rules are checked before the write, not after: an invalid
@@ -1093,7 +1158,7 @@ def screen_subagent(st: Editing) -> m.Screen:
         message = ''
 
     return m.Screen(build, activate=act, cycle=cyc, reload=lambda s: s.refresh(),
-                    title='Subagent model')
+                    help_line=m.HELP_DEL, title='Subagent model')
 
 
 def toolsets_path() -> Path:
@@ -1161,8 +1226,8 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
                               f'{len(tools)} tool(s)' + ('   ← in use' if is_now else ''))(
                                  sets[name], same),
                              key=f'use:{name}',
-                             help='enter applies it, ‹› deletes it',
-                             on_cycle=drop))
+                             help='enter applies it, backspace deletes it',
+                             on_delete=drop))
         if not sets:
             rows.append(Item('info', 'none saved yet'))
         rows += [Item('sep'),
@@ -1171,7 +1236,7 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
                  Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
-    def drop(s: Editing, item: Item, forward: bool) -> None:
+    def drop(s: Editing, item: Item) -> None:
         nonlocal message
         sets = read_toolsets(path)
         name = item.key[4:]
@@ -1189,7 +1254,9 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
             if not current:
                 message = 'nothing to save — no tool is disabled right now'
                 return True
-            name = ask('   name for this set: ').strip()
+            name = (ask('Name for this set',
+                        hint=f'{len(current)} disabled tool(s) will be saved under it.')
+                    or '').strip()
             if not name:
                 return True
             if '=' in name or ',' in name:
@@ -1210,7 +1277,7 @@ def screen_toolsets(st: Editing, path: Path | None = None) -> m.Screen:
         return True
 
     return m.Screen(build, activate=act, reload=lambda s: s.refresh(),
-                    title='Tool sets')
+                    help_line=m.HELP_DEL, title='Tool sets')
 
 
 def screen_thinking(st: Editing) -> m.Screen:
@@ -1231,7 +1298,7 @@ def screen_thinking(st: Editing) -> m.Screen:
     """
     message = ''
 
-    def reset(s: Editing, item: Item, forward: bool) -> None:
+    def reset(s: Editing, item: Item) -> None:
         nonlocal message
         key = item.key.split(':', 1)[1]
         s.doc.remove(S_THINKING, key)
@@ -1261,10 +1328,12 @@ def screen_thinking(st: Editing) -> m.Screen:
             rows.append(Item('action', key,
                              (lambda k: lambda x: fmt_state(*shown(x.data, k, S_THINKING)))(key),
                              key=f'eff:{key}', on_cycle=step_effort,
-                             help='‹› picks a level, enter hands it back to Kimi'))
-        rows.append(Item('action', K_THINK_KEEP,
+                             on_delete=reset,
+                             help='‹› picks a level, backspace hands it back to Kimi'))
+        rows.append(Item('cycle', K_THINK_KEEP,
                          lambda x: fmt_state(*shown(x.data, K_THINK_KEEP, S_THINKING)),
-                         key=f'txt:{K_THINK_KEEP}', on_cycle=reset,
+                         key=f'keep:{K_THINK_KEEP}', choices=KEEP_MODES,
+                         on_delete=reset,
                          help='Whether earlier thinking is re-sent. `all` keeps it, '
                               '`off` drops it. Keeping it costs tokens.'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
@@ -1276,19 +1345,10 @@ def screen_thinking(st: Editing) -> m.Screen:
         if item.key == 'back':
             return False
         if item.key.startswith('eff:'):
-            # Enter is the way back to Kimi's own choice, because a level you
-            # want is one ‹› away and a level you no longer want has nowhere
-            # else to go.
-            key = item.key[4:]
-            s.doc.remove(S_THINKING, key)
-            message = f'{key} back to Kimi\'s default'
-        elif item.key.startswith('txt:'):
-            key = item.key[4:]
-            cur = shown(s.data, key, S_THINKING)[0]
-            raw = ask(f'   {key} [{cur}] (enter keeps it): ')
-            if raw:
-                s.doc.set(S_THINKING, key, lit(raw))
-                message = f'{key} = {raw}'
+            # Every level is one ‹› away, so enter has nothing left to ask.
+            # Handing the setting back is backspace, the same key as
+            # everywhere else in this menu.
+            message = 'use ‹› to pick a level, backspace to hand it back to Kimi'
         return True
 
     def cyc(s: Editing, item: Item, forward: bool) -> None:
@@ -1302,6 +1362,13 @@ def screen_thinking(st: Editing) -> m.Screen:
             key = item.key[5:]
             value, explicit = shown(s.data, key, S_THINKING)
             s.doc.set(S_THINKING, key, lit(not (value is True) if explicit else False))
+            message = ''
+        elif item.key.startswith('keep:'):
+            key = item.key[5:]
+            cur = shown(s.data, key, S_THINKING)[0]
+            i = KEEP_MODES.index(cur) if cur in KEEP_MODES else -1
+            s.doc.set(S_THINKING, key,
+                      lit(KEEP_MODES[(i + (1 if forward else -1)) % len(KEEP_MODES)]))
             message = ''
 
     return m.Screen(build, activate=act, cycle=cyc, reload=lambda s: s.refresh(),
@@ -1595,7 +1662,7 @@ def _selfcheck():
         global ask
         queue = list(texts) or ['']
 
-        def scripted(prompt):
+        def scripted(title, value='', hint=''):
             return queue.pop(0) if len(queue) > 1 else queue[0]
 
         real, ask = ask, scripted
@@ -1603,6 +1670,24 @@ def _selfcheck():
             yield
         finally:
             ask = real
+
+    @contextlib.contextmanager
+    def picking(*choices):
+        """Stand in for the chooser, the way `answering` stands in for the field.
+
+        `None` in the list is a cancelled dialog, which is the only way a
+        chooser can now fail — there is nothing to misspell.
+        """
+        queue = list(choices) or [None]
+
+        def scripted(title, options, hint='', note=None):
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+
+        real, m.pick = m.pick, scripted
+        try:
+            yield
+        finally:
+            m.pick = real
 
     CATALOGUE = [('Alpha', 900), ('Beta', 120), ('Gamma', 30)]
 
@@ -1759,11 +1844,11 @@ def _selfcheck():
                      next(i for i, r in enumerate(rows) if r.key == 'add'), 'enter')
         rows = dirs.build(st)
         ok('an added directory becomes a row',
-           any(r.key == 'drop:~/skills' for r in rows))
+           any(r.key == 'dir:~/skills' for r in rows))
         rel = editing('extra_skill_dirs = ["shared/skills"]\n')
         ok('a relative path says so',
            next(r for r in screen_extra_dirs(rel).build(rel)
-                if r.key.startswith('drop:')).value(rel)
+                if r.key.startswith('dir:')).value(rel)
            == '(relative to the project root)')
         with quiet():
             m.handle(dirs, st, rows,
@@ -1774,13 +1859,18 @@ def _selfcheck():
         st = editing('extra_skill_dirs = ["~/skills"]\n')
         dirs = screen_extra_dirs(st)
         rows = dirs.build(st)
+        # Backspace removes, and enter does not: a list you step through to
+        # look at must not delete an entry on the key that means "open".
+        idx = next(i for i, r in enumerate(rows) if r.key == 'dir:~/skills')
         with quiet():
-            m.handle(dirs, st, rows,
-                     next(i for i, r in enumerate(rows) if r.key == 'drop:~/skills'),
-                     'enter')
+            m.handle(dirs, st, rows, idx, 'enter')
+        ok('enter on a directory removes nothing',
+           any(r.key == 'dir:~/skills' for r in dirs.build(st)))
+        with quiet():
+            m.handle(dirs, st, rows, idx, 'backspace')
         rows = dirs.build(st)
-        ok('removing empties the list',
-           not any(r.key.startswith('drop:') for r in rows))
+        ok('backspace removes the directory',
+           not any(r.key.startswith('dir:') for r in rows))
         with quiet():
             m.handle(dirs, st, rows,
                      next(i for i, r in enumerate(rows) if r.key == 'save'), 'enter')
@@ -1820,11 +1910,23 @@ def _selfcheck():
            row_of(lp, lp.reload(st), f'num:{K_ATTEMPTS}').value(st) == '7',
            row_of(lp, st, f'num:{K_ATTEMPTS}').value(st))
 
-        # ‹› is the only way to say "no opinion" about a number, so it has to
-        # remove the key rather than write a default back into the file.
-        _, _, reloaded = press(lp, st, f'num:{K_ATTEMPTS}', 'left')
-        ok('‹› asks for a reload', reloaded)
-        ok('‹› hands the setting back to Kimi',
+        # ‹› steps through the values worth having, so the ordinary case
+        # needs no typing at all. It always lands on a value from the list,
+        # whatever the file happened to say.
+        with quiet():
+            press(lp, st, f'num:{K_ATTEMPTS}', 'right')
+        stepped = (tomllib.loads(st.doc.text()).get(S_LOOP) or {}).get(K_ATTEMPTS)
+        ok('‹› steps to a listed value', stepped in LOOP_STEPS[K_ATTEMPTS], stepped)
+        with quiet():
+            press(lp, st, f'num:{K_ATTEMPTS}', 'left')
+        ok('and steps back', (tomllib.loads(st.doc.text()).get(S_LOOP) or {})
+           .get(K_ATTEMPTS) != stepped)
+
+        # Backspace is the only way to say "no opinion" about a number, so it
+        # has to remove the key rather than write a default back into the file.
+        _, _, reloaded = press(lp, st, f'num:{K_ATTEMPTS}', 'backspace')
+        ok('backspace asks for a reload', reloaded)
+        ok('backspace hands the setting back to Kimi',
            K_ATTEMPTS not in (tomllib.loads(st.doc.text()).get(S_LOOP) or {}),
            tomllib.loads(st.doc.text()).get(S_LOOP))
         ok('the reset is announced',
@@ -1863,10 +1965,10 @@ def _selfcheck():
            EFFORTS.index(second) == (EFFORTS.index(first) + 1) % len(EFFORTS),
            (first, second))
 
-        # Enter is the way back to Kimi's own choice, because a level you want
-        # is one arrow away and a level you no longer want has nowhere to go.
-        press(th, st, f'eff:{K_THINK_EFFORT}', 'enter')
-        ok('enter hands the level back to Kimi',
+        # Backspace is the way back to Kimi's own choice: a level you want is
+        # one arrow away, and removing is the same key on every screen here.
+        press(th, st, f'eff:{K_THINK_EFFORT}', 'backspace')
+        ok('backspace hands the level back to Kimi',
            K_THINK_EFFORT not in (tomllib.loads(st.doc.text()).get(S_THINKING) or {}),
            tomllib.loads(st.doc.text()).get(S_THINKING))
 
@@ -1876,18 +1978,16 @@ def _selfcheck():
         ok('forced_effort is its own key',
            K_THINK_FORCED in section and K_THINK_EFFORT not in section, section)
 
-        # `keep` takes a word no list can hold, so it asks — and a refusal to
-        # answer must leave the file alone.
-        before = st.doc.text()
-        with answering(''), quiet():
-            press(th, st, f'txt:{K_THINK_KEEP}', 'enter')
-        ok('an empty answer writes nothing', st.doc.text() == before)
-        with answering('all'), quiet():
-            press(th, st, f'txt:{K_THINK_KEEP}', 'enter')
-        ok('keep is written',
-           tomllib.loads(st.doc.text())[S_THINKING][K_THINK_KEEP] == 'all')
-        press(th, st, f'txt:{K_THINK_KEEP}', 'left')
-        ok('‹› hands keep back to Kimi',
+        # `keep` is a two-value setting in the engine, so it is a row you step
+        # through rather than a word to type. Nothing here reads a line.
+        press(th, st, f'keep:{K_THINK_KEEP}', 'right')
+        written = tomllib.loads(st.doc.text())[S_THINKING][K_THINK_KEEP]
+        ok('keep steps to a value the engine knows', written in KEEP_MODES, written)
+        press(th, st, f'keep:{K_THINK_KEEP}', 'right')
+        ok('and on to the other one',
+           tomllib.loads(st.doc.text())[S_THINKING][K_THINK_KEEP] != written)
+        press(th, st, f'keep:{K_THINK_KEEP}', 'backspace')
+        ok('backspace hands keep back to Kimi',
            K_THINK_KEEP not in tomllib.loads(st.doc.text())[S_THINKING])
 
         # -- tool sets -------------------------------------------------------
@@ -1919,10 +2019,15 @@ def _selfcheck():
            tomllib.loads(st.doc.text())[S_TOOLS]['disabled'] == ['CronCreate', 'CronList'],
            tomllib.loads(st.doc.text())[S_TOOLS])
 
-        # ‹› deletes the set and must leave config.toml alone.
+        # Backspace deletes the set and must leave config.toml alone. ‹› used
+        # to do it, which meant stepping through the list to read it deleted
+        # an entry — the bug this key change fixes.
         before = st.doc.text()
         press(ts, st, 'use:cron', 'right')
-        ok('‹› deletes the set', read_toolsets(sets_path) == {})
+        ok('‹› no longer deletes a set', read_toolsets(sets_path) != {},
+           read_toolsets(sets_path))
+        press(ts, st, 'use:cron', 'backspace')
+        ok('backspace deletes the set', read_toolsets(sets_path) == {})
         ok('deleting a set does not touch config.toml', st.doc.text() == before)
 
         ok('tool sets: back closes', press(ts, st, 'back', 'enter')[1] is False)
@@ -1984,39 +2089,47 @@ def _selfcheck():
             ok('hooks: never lands on an unselectable row', pos not in dead, pos)
         ok('hooks: back closes', press(hk, st, 'back', 'enter')[1] is False)
 
-        # ‹› deletes the hook it is on, not the first one.
+        # Backspace deletes the hook it is on, not the first one — and ‹›,
+        # which used to do it, now leaves the list alone.
         press(hk, st, 'hook:1', 'right')
-        ok('‹› deletes the hook under the cursor',
+        ok('‹› no longer deletes a hook',
+           len(tomllib.loads(st.doc.text())[S_HOOKS]) == 2,
+           tomllib.loads(st.doc.text()).get(S_HOOKS))
+        press(hk, st, 'hook:1', 'backspace')
+        ok('backspace deletes the hook under the cursor',
            [h['event'] for h in tomllib.loads(st.doc.text())[S_HOOKS]] == ['SessionStart'],
            tomllib.loads(st.doc.text()).get(S_HOOKS))
 
-        # Adding: the event has to be one Kimi knows, and the command cannot
-        # be empty — both are refused where the user can still see why.
+        # Adding: the event and the timeout are chosen from lists the program
+        # already holds, so neither can be misspelled and neither is
+        # validated afterwards. What is still typed is the command, and an
+        # empty one is refused where the user can see why.
         st = editing('[tools]\n')
         hk = screen_hooks(st)
-        with answering('SessionStart', 'echo hi', '', ''), quiet():
+        with picking('SessionStart', "Kimi's own"), answering('echo hi', ''), quiet():
             press(hk, st, 'add', 'enter')
         added = tomllib.loads(st.doc.text()).get(S_HOOKS) or []
-        ok('a hook is added by name',
+        ok('a hook is added from the chosen event',
            added and added[0] == {'event': 'SessionStart', 'command': 'echo hi'}, added)
 
         before = st.doc.text()
-        with answering('NotAnEvent', 'echo hi', '', ''), quiet():
+        with picking(None), quiet():
             press(hk, st, 'add', 'enter')
-        ok('an unknown event is refused', st.doc.text() == before)
-        with answering('Stop', '', '', ''), quiet():
+        ok('a cancelled event chooser adds nothing', st.doc.text() == before)
+        with picking('Stop'), answering(''), quiet():
             press(hk, st, 'add', 'enter')
         ok('an empty command is refused', st.doc.text() == before)
-        with answering('Stop', 'echo x', '', '9999'), quiet():
-            press(hk, st, 'add', 'enter')
-        ok('an out-of-range timeout is refused', st.doc.text() == before)
 
-        # The event may also be picked by its number in the printed list.
-        with answering('12', 'echo numbered', '', ''), quiet():
+        # A chosen timeout reaches the file as a number, and Kimi's own is
+        # the absence of the key rather than a value standing in for it.
+        with picking('Stop', '30'), answering('echo x', ''), quiet():
             press(hk, st, 'add', 'enter')
-        events = [h['event'] for h in (tomllib.loads(st.doc.text()).get(S_HOOKS) or [])]
-        ok('an event can be picked by number',
-           events[-1] == HOOK_EVENTS[11], (events, HOOK_EVENTS[11]))
+        last = (tomllib.loads(st.doc.text()).get(S_HOOKS) or [])[-1]
+        ok('a chosen timeout is written as a number', last.get('timeout') == 30, last)
+        with picking('Stop', "Kimi's own"), answering('echo y', ''), quiet():
+            press(hk, st, 'add', 'enter')
+        last = (tomllib.loads(st.doc.text()).get(S_HOOKS) or [])[-1]
+        ok('Kimi\'s own timeout writes no key', 'timeout' not in last, last)
 
         # -- subagent model --------------------------------------------------
         # The four rules are Kimi's own, and getting one wrong does not make a
@@ -2113,6 +2226,33 @@ def _selfcheck():
         with answering('primary', 'nope'), quiet():
             press(sa, st, 'pool:add', 'enter')
         ok('a reserved pool key is refused', st.doc.text() == before)
+
+        # Every pool entry is a row, so removing one is backspace on the entry
+        # rather than typing its name back at a prompt that has to tell you it
+        # did not match.
+        # The running loop refreshes after every action; a scripted press does
+        # not, so the parsed view has to be brought up to date by hand before
+        # the row that the write created can be looked for.
+        st.refresh()
+        ok('a pool entry has a row of its own',
+           any(r.key == 'model:a' for r in sa.build(st)),
+           [r.key for r in sa.build(st)])
+        press(sa, st, 'model:a', 'backspace')
+        ok('backspace removes it from the pool',
+           K_SM_MODELS not in (tomllib.loads(st.doc.text()).get(S_SECONDARY) or {}),
+           tomllib.loads(st.doc.text()).get(S_SECONDARY))
+
+        # With a pool present, default_model is chosen from it rather than
+        # typed — the value has to be one of the entries, so there is nothing
+        # a field could add but a way to get it wrong.
+        st = editing('[secondary_model]\ndefault_model = "a"\n'
+                     '[secondary_model.models]\na = "cheap"\nb = "careful"\n')
+        sa = screen_subagent(st)
+        with picking('b'), quiet():
+            press(sa, st, f'txt:{K_SM_DEFAULT}', 'enter')
+        ok('default_model is picked from the pool',
+           tomllib.loads(st.doc.text())[S_SECONDARY][K_SM_DEFAULT] == 'b',
+           tomllib.loads(st.doc.text())[S_SECONDARY])
 
         # -- every screen against the real config.toml -----------------------
         # The fixtures above are shapes this file invented. A real config has

@@ -30,9 +30,12 @@ DEFAULTS = {
     'read_limits': 'default',         # default | moderate | large
     'auto_accept_plan': 'off',        # on | off
     'effort_router': 'off',           # off | pin | free
-    'spinner_style': 'default',       # default | mirror | braille | dots | moon | blocks
+    'spinner_style': 'default',       # default | mirror | a preset | custom
     'spinner_interval_ms': 'default',  # default, or 20..2000
+    'spinner_frames': 'default',      # the frames `custom` uses, space separated
     'thinking_verbs': 'off',          # on | off
+    'thinking_verbs_list': 'default',  # the words, comma separated
+    'thinking_verbs_format': '{}',    # {} is the word
     'user_message_marker': 'default',  # default, or the prefix itself
     'user_message_border': 'off',     # off | round | single | double | bold | topbottom
     'user_message_style': 'default',  # default | plain | italic | dim | underline
@@ -49,7 +52,14 @@ CHOICES = {
     'read_limits': ['default', 'moderate', 'large'],
     'auto_accept_plan': ['off', 'on'],
     'effort_router': ['off', 'pin', 'free'],
-    'spinner_style': ['default', 'braille', 'dots', 'moon', 'blocks', 'mirror'],
+    'spinner_style': ['default', 'mirror', 'braille', 'dots', 'moon', 'blocks',
+                      'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
+    # A duration is a number, but only a handful of them are worth having: below
+    # 40 ms the difference stops being visible and above 400 the spinner reads
+    # as stuck. Offering the useful ones as a list is what lets the whole screen
+    # be driven with the arrow keys.
+    'spinner_interval_ms': ['default', '40', '60', '80', '100', '120', '160',
+                            '200', '300', '400'],
     'thinking_verbs': ['off', 'on'],
     'user_message_border': ['off', 'round', 'single', 'double', 'bold', 'topbottom'],
     'user_message_style': ['default', 'plain', 'italic', 'dim', 'underline'],

@@ -46,11 +46,25 @@
 // `thinking_verbs` in patch-settings.conf: `off` keeps Kimi's two fixed words,
 // `on` rotates. The default matches lib/patch_settings.py, which registers the
 // same key.
+//
+// `thinking_verbs_list` — `default` uses the words below, anything else is a
+//   comma-separated list of your own. A word is used as written, so trailing
+//   punctuation is yours to include or leave out.
+//
+// `thinking_verbs_format` — where the word goes. `{}` is the word and the
+//   default is the word alone; `{}…` and `· {}` are the other obvious shapes.
+//   A format without `{}` is refused rather than silently showing a fixed
+//   string on every frame, which is what "rotate the verb" is meant to avoid.
 
 const MODE = String(settings.get('thinking_verbs', 'off')).toLowerCase();
+const LIST = String(settings.get('thinking_verbs_list', 'default'));
+const FORMAT = String(settings.get('thinking_verbs_format', '{}'));
 
 if (!['on', 'off'].includes(MODE)) {
   throw new Error(`thinking_verbs must be on or off - got "${MODE}"`);
+}
+if (MODE === 'on' && !FORMAT.includes('{}')) {
+  throw new Error(`thinking_verbs_format must contain {} - got "${FORMAT}"`);
 }
 
 if (MODE === 'off') {
@@ -79,12 +93,23 @@ if (spliceHits !== 1) {
   throw new Error(`the thinking.ts region is not unique (${spliceHits}) - refusing to guess`);
 }
 
-const VERBS = [
+const BUILT_IN_VERBS = [
   'thinking...', 'working...', 'reasoning...', 'planning...',
   'reading...', 'tracing...', 'checking...', 'drafting...',
   'refining...', 'analysing...', 'wiring...', 'sketching...',
   'considering...', 'untangling...', 'verifying...', 'weighing...',
 ];
+
+const chosen = LIST === 'default' || !LIST.trim()
+  ? BUILT_IN_VERBS
+  : LIST.split(',').map(w => w.trim()).filter(Boolean);
+
+if (!chosen.length) {
+  throw new Error('thinking_verbs_list has no words in it - '
+    + 'leave it at default, or list some');
+}
+
+const VERBS = chosen.map(w => FORMAT.split('{}').join(w));
 
 const HELPER =
   '//#endregion\n'

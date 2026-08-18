@@ -161,6 +161,32 @@ invisible in a way nothing else would report.
 anything reads a line, including on the way out. The selected row is already
 marked; a second block blinking under the last line only competes with it.
 
+**Nothing reads a line of text any more.** `input()` reads in cooked mode, so
+an arrow key pressed out of habit arrived as the three bytes of its escape
+sequence *inside the returned string* — and that string was written to
+`config.toml`, where `\x1b` is not a legal character. The next parse threw out
+of a menu that had already redrawn. Every typed value now goes through
+`menu.field`, a bordered one-line field that reads decoded keys: an arrow is
+navigation and cannot become text, backspace deletes, escape means "leave the
+setting alone", which is a different answer from an empty field. Where the
+program already holds the list — the twenty hook events, the models in a pool
+— `menu.pick` offers it instead, so there is nothing to misspell and nothing
+to validate afterwards.
+
+**Backspace removes; ‹› only ever changes a value.** Deleting used to be ‹› on
+a handful of screens, which meant stepping through a list of saved tool sets
+to read it deleted one. One key, one meaning, and the destructive one is the
+key that already means "remove" everywhere else.
+
+**Screens that configure something visual show it.** Themes, the spinner, the
+rotating verb and your own message frame each draw a preview beside the rows —
+tweakcc's second column, and the same reasoning: `glow` and `wave` are names
+for something you recognise on sight and not otherwise. The preview is part of
+the same rendered lines as the rows, so the mouse mapping still holds, and it
+drops below the list on a window too narrow to hold both rather than wrapping.
+The spinner presets and the built-in verbs are read out of the patches that
+splice them in, so the menu cannot offer a preset the patch does not know.
+
 Two things follow from how it is drawn. The mouse map is built by the same
 pass that renders, so a click cannot land on the wrong row; and anything that
 is not a row — header, separator, the help line — is inert rather than treated

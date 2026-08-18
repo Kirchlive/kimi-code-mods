@@ -168,13 +168,72 @@ def effective(theme: dict) -> dict:
     return palette
 
 
-def swatch(hex_value: str) -> str:
-    """A block in the colour itself, for terminals that can show it."""
+def rgb(hex_value: str) -> str:
+    """The escape sequence for a hex colour, or '' if it is not one."""
     try:
         r, g, b = (int(hex_value[i:i + 2], 16) for i in (1, 3, 5))
     except (ValueError, IndexError):
-        return '  '
-    return f'\x1b[38;2;{r};{g};{b}m██\x1b[0m'
+        return ''
+    return f'\x1b[38;2;{r};{g};{b}m'
+
+
+def swatch(hex_value: str) -> str:
+    """A block in the colour itself, for terminals that can show it."""
+    code = rgb(hex_value)
+    return f'{code}██\x1b[0m' if code else '  '
+
+
+def tint(text: str, hex_value: str) -> str:
+    code = rgb(hex_value)
+    return f'{code}{text}\x1b[0m' if code else text
+
+
+# What a Kimi session looks like, in the tokens that colour it. Every line is
+# here because a token drives it: change `roleUser` and the prompt line moves,
+# change `diffAdded` and the `+` line does. A palette is judged by looking at
+# it, and this is the smallest thing worth looking at.
+PREVIEW_WIDTH = 40
+
+
+def preview(palette: dict) -> list[str]:
+    """A mock Kimi transcript in `palette`, as lines ready to be drawn.
+
+    The names on the left of each pair are the tokens, so the preview doubles
+    as the answer to "which one is that": find the thing you want to change on
+    screen, and the row that changes it is the token drawing it here.
+    """
+    def c(token: str) -> str:
+        return palette.get(token, '#888888')
+
+    w = PREVIEW_WIDTH
+    body = [
+        ('', tint('🌕 Kimi Code 0.36.0', c('primary'))),
+        ('', tint('   ~/.kimi-code-mods', c('textMuted'))),
+        ('', ''),
+        ('', tint('> ', c('roleUser')) + tint('list the dir', c('roleUser'))),
+        ('', tint('! ls -la', c('shellMode'))),
+        ('', ''),
+        ('', tint('● Read', c('accent')) + tint('(config.toml)', c('text'))),
+        ('', tint(' ⎿ 42 lines', c('textDim'))),
+        ('', tint('  1 - reserved_context_size = 50000', c('diffRemoved'))),
+        ('', tint('  2 + reserved_context_size = 80000', c('diffAdded'))),
+        ('', tint('  @@ config.toml', c('diffMeta'))),
+        ('', ''),
+        ('', tint('✻ Thinking… (esc to interrupt)', c('textDim'))),
+        ('', tint('✓ done', c('success')) + '  '
+             + tint('⚠ careful', c('warning')) + '  '
+             + tint('✗ failed', c('error'))),
+        ('', tint('The directory holds 123 files.', c('textStrong'))),
+    ]
+    top = tint('┌' + '─' * w + '┐', c('border'))
+    bottom = tint('└' + '─' * w + '┘', c('border'))
+    edge = tint('│', c('border'))
+    out = ['', ' Preview', '', top]
+    for _, line in body:
+        pad = ' ' * max(0, w - 1 - m.visible(line))
+        out.append(f'{edge} {line}{pad}{edge}')
+    out.append(bottom)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -200,7 +259,7 @@ class ThemeState:
 def screen_tokens(st: ThemeState) -> m.Screen:
     """One row per palette token; enter asks for a colour."""
 
-    def clear_token(s: ThemeState, item: Item, forward: bool) -> None:
+    def clear_token(s: ThemeState, item: Item) -> None:
         s.theme.get('colors', {}).pop(item.key[4:], None)
         write_theme(s.theme, s.dir)
         s.message = f'{item.key[4:]} back to the base palette'
@@ -225,8 +284,8 @@ def screen_tokens(st: ThemeState) -> m.Screen:
             rows.append(Item(
                 'action', token,
                 (lambda v, o: lambda x: f'{swatch(v)} {v}{"" if o else "   (base)"}')(value, own),
-                key=f'tok:{token}', on_cycle=clear_token,
-                help=what + '   (enter sets it, ‹› clears it)'))
+                key=f'tok:{token}', on_delete=clear_token,
+                help=what + '   (enter sets it, backspace clears it)'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -237,7 +296,9 @@ def screen_tokens(st: ThemeState) -> m.Screen:
         if item.key.startswith('tok:'):
             token = item.key[4:]
             current = effective(s.theme).get(token, '')
-            raw = _ask(f'{token} [{current}] : ').strip()
+            raw = (_ask(token, current,
+                        hint='Six-digit hex, #RRGGBB. Anything else Kimi drops '
+                             'without a word.') or '').strip()
             if not raw:
                 return True
             why = valid_color(raw)
@@ -255,7 +316,8 @@ def screen_tokens(st: ThemeState) -> m.Screen:
             write_theme(s.theme, s.dir)
 
     return m.Screen(build, activate=act, cycle=cyc, reload=lambda s: s.reload(),
-                    title='Theme')
+                    aside=lambda s: preview(effective(s.theme)),
+                    help_line=m.HELP_DEL, title='Theme')
 
 
 def screen_themes(st: ThemeState) -> m.Screen:
@@ -274,7 +336,8 @@ def screen_themes(st: ThemeState) -> m.Screen:
             rows.append(Item('action', n,
                              (lambda th: lambda x: f'{len(th.get("colors", {}))} '
                                                    f'token(s) over {th.get("base", "dark")}')(t),
-                             key=f'edit:{n}'))
+                             key=f'edit:{n}', on_delete=delete,
+                             help='enter edits it, backspace deletes the file'))
         if not names:
             rows.append(Item('info', 'none yet'))
         rows += [Item('sep'),
@@ -288,7 +351,10 @@ def screen_themes(st: ThemeState) -> m.Screen:
         if item.key == 'back':
             return False
         if item.key == 'new':
-            name = _ask('name (letters, digits, dash): ').strip()
+            name = (_ask('Theme name',
+                         hint='Letters, digits, dot, dash or underscore — it is a '
+                              'filename. dark, light and auto are reserved.')
+                    or '').strip()
             why = valid_name(name)
             if why:
                 s.message = f'not created — {why}'
@@ -304,15 +370,37 @@ def screen_themes(st: ThemeState) -> m.Screen:
             m.loop(screen_tokens(inner), inner)
         return True
 
+    def delete(s: ThemeState, item: Item) -> None:
+        """Remove a theme's file. There is nothing else to it — the file *is*
+        the theme, and Kimi stops offering it the moment it is gone."""
+        name = item.key[5:]
+        path = s.dir / f'{name}.json'
+        try:
+            path.unlink()
+            s.message = f'deleted {path.name}'
+        except OSError as e:
+            s.message = f'not deleted — {e}'
+
     return m.Screen(build, activate=act, reload=lambda s: s,
-                    title='Themes')
+                    aside=lambda s: preview(effective(
+                        read_theme(_hovered(s), s.dir))) if list_themes(s.dir) else [],
+                    help_line=m.HELP_DEL, title='Themes')
 
 
-def _ask(prompt: str) -> str:
-    try:
-        return input(prompt)
-    except (EOFError, KeyboardInterrupt):
-        return ''
+def _hovered(s: ThemeState) -> str:
+    """Which theme the list preview should show.
+
+    The list screen has no idea which row the cursor is on — that lives in
+    `loop`. Rather than thread it through, the preview shows the first theme,
+    which is what the cursor starts on; opening one shows its own.
+    """
+    names = list_themes(s.dir)
+    return names[0] if names else ''
+
+
+def _ask(title: str, value: str = '', hint: str = ''):
+    """One typed value, in a field. See `menu.field` for why not `input()`."""
+    return m.field(title, value, hint)
 
 
 # --------------------------------------------------------------------------
@@ -405,13 +493,18 @@ def _selfcheck() -> int:
                 check(f'{label}: mapped line holds its row',
                       rows[ri].label in lines[line_no], lines[line_no])
 
-        # ‹› on a token row clears the override and writes the file.
+        # Backspace on a token row clears the override and writes the file;
+        # ‹›, which used to do it, leaves the colour alone.
         inner = ThemeState(d, 'midnight')
         screen = screen_tokens(inner)
         rows = screen.build(inner)
         idx = next(i for i, r in enumerate(rows) if r.key == 'tok:roleUser')
         m.handle(screen, inner, rows, idx, 'right')
-        check('clearing a token writes through',
+        check('‹› no longer clears a token',
+              read_theme('midnight', d)['colors'] != {},
+              read_theme('midnight', d)['colors'])
+        m.handle(screen, inner, rows, idx, 'backspace')
+        check('backspace clears a token and writes through',
               read_theme('midnight', d)['colors'] == {},
               read_theme('midnight', d)['colors'])
 

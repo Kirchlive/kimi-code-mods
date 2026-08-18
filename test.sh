@@ -15,6 +15,15 @@ PASS=0; FAIL=0
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
+# What the suite must not touch. A self-check that writes a real settings file
+# instead of its sandbox copy is invisible — it passes, and the change only
+# shows up later as a setting nobody remembers making. Snapshotted before
+# anything runs, so a file the user edited on purpose is not mistaken for one
+# a test wrote.
+WATCHED='patch-settings.conf toolsets.conf env-profile.conf'
+snapshot() { (cd "$HERE" && git status --porcelain -- $WATCHED 2>/dev/null); }
+BEFORE="$(snapshot)"
+
 ok()   { PASS=$((PASS+1)); echo "  ok   $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "  FAIL $1${2:+  — $2}"; }
 check(){ if [ "$1" = 0 ]; then ok "$2"; else bad "$2" "${3:-}"; fi; }
@@ -187,6 +196,13 @@ if [ "${1:-}" = --full ]; then
     check $? 'guard survives a simulated auto-update (patch, replace, repair)'
   fi
 fi
+
+echo
+echo 'the suite leaves the real settings alone:'
+AFTER="$(snapshot)"
+[ "$AFTER" = "$BEFORE" ]
+check $? 'no check wrote to a settings file outside its sandbox' \
+      "$(printf '%s' "$AFTER" | head -3)"
 
 echo
 if [ "$FAIL" -eq 0 ]; then

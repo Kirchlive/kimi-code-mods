@@ -328,11 +328,17 @@ def build_items(st: State) -> list[Item]:
                  len(themes.list_themes())),
              key='themes',
              help='Modify Kimi Code\'s built-in themes or create your own.'),
-        Item('submenu', 'Thinking verbs', switches('verbs'), group_note('verbs'),
-             key='verbs',
+        # These two say what they are rather than how many of their keys are
+        # off their default: "on, 16 words" is the answer to the question the
+        # row raises, and "2 changed" is not.
+        Item('submenu', 'Thinking verbs',
+             lambda s: ('off' if s.settings.get('thinking_verbs') != 'on'
+                        else f'on, {len(verb_words(s))} words'),
+             group_note('verbs'), key='verbs',
              help='Rotate the word beside the spinner instead of always saying "working".'),
-        Item('submenu', 'Thinking style', switches('style'), group_note('style'),
-             key='style',
+        Item('submenu', 'Thinking style',
+             lambda s: str(s.settings.get('spinner_style', 'default')),
+             group_note('style'), key='style',
              help='The characters the working indicator cycles through, and how fast.'),
         Item('submenu', 'User message display', switches('usermsg'), group_note('usermsg'),
              key='usermsg',
@@ -389,10 +395,6 @@ def build_items(st: State) -> list[Item]:
                  data.get(cfg.S_THINKING) or {}),
              key='thinking',
              help='How hard the model thinks, and whether thinking is re-sent.'),
-        Item('cycle', 'Fullscreen renderer',
-             lambda s: 'always' if env_value(s.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1' else 'default',
-             key='fullscreen', choices=['default', 'always'],
-             help='Run Kimi in the alternate screen buffer. Applied by bin/kimi.'),
         Item('submenu', 'Transcript window',
              lambda s: f'{env_count(s.root)} variable(s) set',
              key='display',
@@ -499,10 +501,7 @@ def draw(st: State, items: list[Item], cursor: int) -> dict:
 def run(cmd: list[str], root: Path) -> None:
     """Hand the terminal over to a component, then come back."""
     subprocess.run(cmd, cwd=str(root))
-    try:
-        input('\n[enter] back to the menu ')
-    except (EOFError, KeyboardInterrupt):
-        print()
+    m.press_any()
 
 
 def open_file(path: Path) -> None:
@@ -540,19 +539,17 @@ def config_item(st: State, item: str) -> None:
     # needs no acknowledgement — the value it changed is visible in the row
     # you came back to.
     if not cfg.commit(st.config_path, editing.doc.text(), False):
-        ask('\n   [enter] back ')
+        m.press_any()
 
 
-def ask(prompt: str) -> str:
-    """One line of free text, for the few values no list can offer.
+def ask(title: str, value: str = '', hint: str = ''):
+    """One typed value, in a field. `None` means the user changed their mind.
 
-    Wrapped so the caller does not have to think about a closed stdin, which
-    happens whenever the menu is smoke-tested without a terminal.
+    Never `input()`: a line read in cooked mode takes an arrow key as the
+    bytes of its escape sequence and hands them back inside the string. See
+    `menu.field`, which is where that crash is explained and prevented.
     """
-    try:
-        return input(prompt).strip()
-    except (EOFError, KeyboardInterrupt):
-        return ''
+    return m.field(title, value, hint)
 
 
 def sub(screen: m.Screen, st: State) -> None:
@@ -585,7 +582,9 @@ def screen_prompts(st: State) -> m.Screen:
         elif item.key == 'extract':
             run([str(s.root / 'kimi-patch.sh'), '--extract-prompts'], s.root)
         elif item.key == 'migrate':
-            tree = ask('freshly extracted tree: ')
+            tree = ask('Freshly extracted tree',
+                       hint='The directory --extract-prompts wrote, '
+                            'e.g. system-prompts.0.36.0.new')
             if tree:
                 run([str(s.root / 'kimi-patch.sh'), '--migrate', tree], s.root)
         elif item.key == 'open':
@@ -613,13 +612,13 @@ def screen_display(st: State) -> m.Screen:
     env = str(HERE / 'kimi-env.sh')
 
     def build(s: State) -> list[Item]:
-        rows = [Item('info', 'set a value with enter, clear it with ‹›; '
-                             'blank means Kimi\'s own default'),
+        rows = [Item('info', 'enter sets a value, backspace clears it; '
+                             'cleared means Kimi\'s own default'),
                 Item('sep')]
         for name, value in env_rows(s.root):
             rows.append(Item('action', name,
                              (lambda v: lambda x: v or '—')(value),
-                             key=f'env:{name}'))
+                             key=f'env:{name}', on_delete=clear))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -628,21 +627,23 @@ def screen_display(st: State) -> m.Screen:
             return False
         if item.key.startswith('env:'):
             name = item.key[4:]
-            val = ask(f'{name} = ')
+            current = env_value(s.root, name) or ''
+            val = ask(name, current, hint='Escape leaves it as it is; '
+                                          'backspace on the row clears it.')
+            if val is None:
+                return True
             if val:
                 subprocess.run(['bash', env, 'set', name, val])
             else:
                 subprocess.run(['bash', env, 'unset', name], capture_output=True)
         return True
 
-    def clear(s: State, item: Item, forward: bool) -> None:
+    def clear(s: State, item: Item) -> None:
         if item.key.startswith('env:'):
             subprocess.run(['bash', env, 'unset', item.key[4:]], capture_output=True)
 
-    # `cycle` is wired to the same rows so ‹› clears a variable. An action row
-    # never receives a cycle, so this only fires where it is meant to.
-    return m.Screen(build, activate=act, cycle=clear, reload=reload_state,
-                    title='Launcher environment')
+    return m.Screen(build, activate=act, reload=reload_state,
+                    help_line=m.HELP_DEL, title='Launcher environment')
 
 
 # Every patch-backed switch, with the sentence that explains what it costs.
@@ -691,6 +692,15 @@ PATCH_HELP = {
     'thinking_verbs': (
         'Thinking verbs',
         'Rotate the word beside the spinner instead of always saying "working".', 'verbs'),
+    'thinking_verbs_list': (
+        'Thinking verb list',
+        'The words to rotate through. `default` uses the patch\'s own list.', 'verbs'),
+    'thinking_verbs_format': (
+        'Thinking verb format',
+        'Where the word goes; {} is the word.', 'verbs'),
+    'spinner_frames': (
+        'Your own spinner frames',
+        'The frames the `custom` style uses. Separate with spaces.', 'spinner'),
     'user_message_marker': (
         'Your message marker',
         'The prefix in front of what you typed. Kimi\'s own is a sparkle.', 'user-message'),
@@ -712,8 +722,10 @@ PATCH_HELP = {
 # failure a single "Patch settings" screen made impossible and this split
 # makes possible again.
 SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
-    'verbs': ('Thinking verbs', ['thinking_verbs']),
-    'style': ('Thinking style', ['spinner_style', 'spinner_interval_ms']),
+    'verbs': ('Thinking verbs', ['thinking_verbs', 'thinking_verbs_list',
+                                 'thinking_verbs_format']),
+    'style': ('Thinking style', ['spinner_style', 'spinner_interval_ms',
+                                 'spinner_frames']),
     'usermsg': ('User message display', ['user_message_marker',
                                          'user_message_border',
                                          'user_message_style']),
@@ -763,23 +775,387 @@ def screen_settings(st: State, group: str) -> m.Screen:
                 # No list can hold a duration or a prefix, so enter asks.
                 rows.append(Item('action', label, value, note,
                                  key=key, help=help_text + '  (enter to type a value)'))
+        # Everything else on the root menu opens a screen of its own. The
+        # fullscreen renderer never did — it was one switch sitting among the
+        # doors — so it belongs here with the other switches. It is the one
+        # row on this screen the patches do not read: `bin/kimi` exports it,
+        # so it takes effect at the next start with no patch run at all.
+        if group == 'misc':
+            rows.append(Item('cycle', 'Fullscreen renderer',
+                             lambda x: 'always' if env_value(
+                                 x.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1'
+                             else 'default',
+                             lambda x: 'applied by bin/kimi, no patch run',
+                             key='fullscreen', choices=['default', 'always'],
+                             help='Run Kimi in the alternate screen buffer.'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
-        if item.key in ps.DEFAULTS:
-            current = s.settings.get(item.key, ps.DEFAULTS[item.key])
-            raw = ask(f'{item.key} [{current}] (empty restores the default): ')
-            ps.set_value(item.key, raw or ps.DEFAULTS[item.key], s.settings_path)
+        if item.key in ps.DEFAULTS and item.key not in ps.CHOICES:
+            current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
+            raw = ask(item.key, current,
+                      hint='Escape leaves it as it is; backspace on the row '
+                           'restores the default.')
+            if raw is not None and raw != '':
+                ps.set_value(item.key, raw, s.settings_path)
         return True
 
     def cyc(s: State, item: Item, forward: bool) -> None:
-        ps.cycle(item.key, forward, s.settings_path)
+        if item.key == 'fullscreen':
+            cycle_item(s, item, forward)
+        else:
+            ps.cycle(item.key, forward, s.settings_path)
+
+    def restore(s: State, item: Item) -> None:
+        if item.key in ps.DEFAULTS:
+            ps.set_value(item.key, ps.DEFAULTS[item.key], s.settings_path)
+
+    return m.Screen(build, activate=act, cycle=cyc, delete=restore,
+                    reload=reload_state, help_line=m.HELP_DEL, title=title)
+
+
+def patch_list(patch: Path | None, name: str) -> list[str]:
+    """A list literal read out of a patch, so the menu shows what will be used.
+
+    The spinner presets and the built-in verbs live in the patches, because
+    that is where they are spliced into the bundle from. The menu needs them
+    too — a row that says `wave` without showing `▁▃▄▅▆▇█` is asking you to
+    choose blind. Copying the tables here would mean two lists that agree
+    until the day someone edits one, so they are read from the one that is
+    authoritative instead.
+
+    A patch that has been rewritten past recognition yields an empty list, and
+    the screen then shows names without examples rather than failing.
+    """
+    if patch is None:
+        return []
+    try:
+        text = patch.read_text(encoding='utf8')
+    except OSError:
+        return []
+    match = re.search(rf'{re.escape(name)}\s*=\s*\[(.*?)\]', text, re.S)
+    return re.findall(r"'([^']*)'", match.group(1)) if match else []
+
+
+def patch_table(patch: Path | None, name: str) -> dict[str, list[str]]:
+    """The same, for a `{key: [...], …}` literal."""
+    if patch is None:
+        return {}
+    try:
+        text = patch.read_text(encoding='utf8')
+    except OSError:
+        return {}
+    match = re.search(rf'{re.escape(name)}\s*=\s*{{(.*?)\n}};', text, re.S)
+    if not match:
+        return {}
+    out = {}
+    for key, body in re.findall(r'(\w+):\s*\[([^\]]*)\]', match.group(1)):
+        out[key] = re.findall(r"'([^']*)'", body)
+    return out
+
+
+def spinner_frames(st: State) -> list[str]:
+    """The frames the current setting will actually produce."""
+    style = st.settings.get('spinner_style', 'default')
+    presets = patch_table(st.patch_file('spinner'), 'PRESETS')
+    if style == 'custom':
+        raw = st.settings.get('spinner_frames', 'default')
+        if raw in ('', 'default'):
+            return []
+        parts = raw.split()
+        return parts if len(parts) > 1 else list(raw.strip())
+    if style in presets:
+        return presets[style]
+    # `default` and `mirror` both keep Kimi's own braille set on screen; the
+    # difference between them is the order, which a still preview cannot show.
+    return ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+
+def spinner_preview(st: State) -> list[str]:
+    """One frame of the working indicator, as it will be drawn."""
+    frames = spinner_frames(st)
+    rate = st.settings.get('spinner_interval_ms', 'default')
+    verb = 'working…' if st.settings.get('thinking_verbs') == 'on' else 'working...'
+    out = ['', ' Preview', '', '  ┌' + '─' * 34 + '┐']
+    for f in (frames[:6] or ['—']):
+        line = f'{f} {verb} (esc to interrupt)'
+        out.append('  │ ' + line + ' ' * max(0, 33 - m.visible(line)) + '│')
+    out.append('  └' + '─' * 34 + '┘')
+    out.append('')
+    out.append(f'  {len(frames)} frame(s), '
+               + ('Kimi\'s own speed' if rate == 'default' else f'{rate} ms each'))
+    return out
+
+
+def screen_thinking_style(st: State) -> m.Screen:
+    """The spinner: which characters it cycles through, and how fast.
+
+    Every preset is a row showing its own frames, because that is the only
+    form of this question anyone can answer — `glow` and `wave` are names for
+    something you recognise on sight and not otherwise.
+    """
+    presets = patch_table(st.patch_file('spinner'), 'PRESETS')
+
+    def build(s: State) -> list[Item]:
+        current = s.settings.get('spinner_style', 'default')
+        note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('spinner'))
+        rows = [Item('info', 'read while the patches are applied — '
+                             'a change here needs a patch run'),
+                Item('sep')]
+        for name in ps.CHOICES['spinner_style']:
+            if name == 'default':
+                shown = 'Kimi\'s own'
+            elif name == 'mirror':
+                shown = 'Kimi\'s own, then reversed'
+            elif name == 'custom':
+                raw = s.settings.get('spinner_frames', 'default')
+                shown = '—' if raw in ('', 'default') else ' '.join(spinner_frames(s)[:10])
+            else:
+                shown = ' '.join(presets.get(name, []))
+            rows.append(Item('action', name,
+                             (lambda t, on: lambda x: ('● ' if on else '○ ') + t)(
+                                 shown, name == current),
+                             note if name == current else (lambda x: ''),
+                             key=f'style:{name}'))
+        rows += [
+            Item('sep'),
+            Item('cycle', 'Update interval',
+                 lambda x: (lambda v: 'Kimi\'s own' if v == 'default' else f'{v} ms')(
+                     x.settings.get('spinner_interval_ms', 'default')),
+                 key='spinner_interval_ms', choices=ps.CHOICES['spinner_interval_ms'],
+                 help='How long one frame stays on screen. Lower is faster.'),
+            Item('action', 'Your own frames',
+                 lambda x: (lambda v: '—' if v in ('', 'default') else v)(
+                     x.settings.get('spinner_frames', 'default')),
+                 key='spinner_frames',
+                 on_delete=lambda s, i: ps.set_value('spinner_frames', 'default',
+                                                     s.settings_path),
+                 help='Separate frames with spaces, or write them run together. '
+                      'Picked up by the custom row above.'),
+            Item('sep'),
+            Item('action', 'Back', lambda x: '', key='back'),
+        ]
+        return rows
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key.startswith('style:'):
+            ps.set_value('spinner_style', item.key[6:], s.settings_path)
+        elif item.key == 'spinner_frames':
+            raw = ask('Your own frames',
+                      '' if s.settings.get('spinner_frames') in ('default', '') else
+                      s.settings.get('spinner_frames'),
+                      hint='Two or more. "⠋ ⠙ ⠹" and "⠋⠙⠹" mean the same thing; '
+                           'use spaces for frames made of several characters.')
+            if raw:
+                ps.set_value('spinner_frames', raw, s.settings_path)
+                ps.set_value('spinner_style', 'custom', s.settings_path)
+        return True
+
+    def cyc(s: State, item: Item, forward: bool) -> None:
+        if item.key in ps.CHOICES:
+            ps.cycle(item.key, forward, s.settings_path)
 
     return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
-                    title=title)
+                    aside=spinner_preview, help_line=m.HELP_DEL,
+                    title='Thinking style')
+
+
+def verb_words(st: State) -> list[str]:
+    """The words the rotation will use — your own, or the patch's own list."""
+    raw = st.settings.get('thinking_verbs_list', 'default')
+    if raw in ('', 'default'):
+        return patch_list(st.patch_file('verbs'), 'BUILT_IN_VERBS')
+    return [w.strip() for w in raw.split(',') if w.strip()]
+
+
+def verb_preview(st: State) -> list[str]:
+    fmt = st.settings.get('thinking_verbs_format', '{}')
+    words = verb_words(st)
+    frame = (spinner_frames(st) or ['✻'])[0]
+    out = ['', ' Preview', '', '  ┌' + '─' * 34 + '┐']
+    for w in (words[:6] or ['—']):
+        line = f'{frame} {fmt.replace("{}", w)} (esc to interrupt)'
+        out.append('  │ ' + line + ' ' * max(0, 33 - m.visible(line)) + '│')
+    out.append('  └' + '─' * 34 + '┘')
+    out += ['', f'  {len(words)} word(s), one every 3.5 s']
+    return out
+
+
+def screen_thinking_verbs(st: State) -> m.Screen:
+    """The words beside the spinner: whether they rotate, which ones, and how."""
+
+    def build(s: State) -> list[Item]:
+        note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('verbs'))
+        rows = [Item('info', 'read while the patches are applied — '
+                             'a change here needs a patch run'),
+                Item('sep'),
+                Item('cycle', 'Rotate the verb',
+                     lambda x: BOX.get(x.settings.get('thinking_verbs', 'off'), '?'),
+                     note, key='thinking_verbs', choices=ps.CHOICES['thinking_verbs'],
+                     help='Off keeps Kimi\'s two fixed words.'),
+                Item('action', 'Format',
+                     lambda x: x.settings.get('thinking_verbs_format', '{}'),
+                     key='thinking_verbs_format',
+                     on_delete=lambda s2, i: ps.set_value('thinking_verbs_format', '{}',
+                                                          s2.settings_path),
+                     help='Where the word goes. {} is the word.'),
+                Item('sep'),
+                Item('info', 'the words, in the order they rotate'),
+                ]
+        for i, word in enumerate(verb_words(s)):
+            rows.append(Item('action', f'  {word}', lambda x: '', key=f'verb:{i}',
+                             on_delete=drop_word,
+                             help='backspace removes it from the list'))
+        rows += [Item('action', 'Add a word', lambda x: '', key='add'),
+                 Item('action', 'Kimi-mods\' own list', lambda x: '', key='reset',
+                      help='Puts the built-in words back.'),
+                 Item('sep'),
+                 Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def write_words(s: State, words: list[str]) -> None:
+        """Persist the list, or hand it back to the patch's own when it is empty."""
+        ps.set_value('thinking_verbs_list',
+                     ', '.join(words) if words else 'default', s.settings_path)
+
+    def drop_word(s: State, item: Item) -> None:
+        words = verb_words(s)
+        i = int(item.key[5:])
+        if 0 <= i < len(words):
+            del words[i]
+            write_words(s, words)
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key == 'add':
+            word = ask('A word', hint='Shown beside the spinner. '
+                                      'Punctuation is yours to include.')
+            if word:
+                write_words(s, verb_words(s) + [word])
+        elif item.key == 'reset':
+            ps.set_value('thinking_verbs_list', 'default', s.settings_path)
+        elif item.key == 'thinking_verbs_format':
+            raw = ask('Format', s.settings.get('thinking_verbs_format', '{}'),
+                      hint='{} is the word. "{}…" and "· {}" are the other '
+                           'obvious shapes.')
+            if raw and '{}' in raw:
+                ps.set_value('thinking_verbs_format', raw, s.settings_path)
+        return True
+
+    def cyc(s: State, item: Item, forward: bool) -> None:
+        if item.key in ps.CHOICES:
+            ps.cycle(item.key, forward, s.settings_path)
+
+    return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
+                    aside=verb_preview, help_line=m.HELP_DEL,
+                    title='Thinking verbs')
+
+
+# The frame each border setting draws, read the same way the patch draws it.
+USER_FRAMES = {
+    'round': ('╭', '╮', '╰', '╯', '─', '│'),
+    'single': ('┌', '┐', '└', '┘', '─', '│'),
+    'double': ('╔', '╗', '╚', '╝', '═', '║'),
+    'bold': ('┏', '┓', '┗', '┛', '━', '┃'),
+    'topbottom': ('', '', '', '', '─', ''),
+}
+
+STYLE_SGR = {'default': '\x1b[1m', 'plain': '', 'italic': '\x1b[3m',
+             'dim': '\x1b[2m', 'underline': '\x1b[4m'}
+
+
+def user_message_preview(st: State) -> list[str]:
+    """Your own message drawn twice: as Kimi does it, and as you asked for it."""
+    marker = st.settings.get('user_message_marker', 'default')
+    border = st.settings.get('user_message_border', 'off')
+    style = st.settings.get('user_message_style', 'default')
+
+    text = 'list the dir'
+    prefix = '✨ ' if marker in ('default', '') else ('' if marker == 'none' else
+                                                     (marker if marker.endswith(' ')
+                                                      else marker + ' '))
+    sgr = STYLE_SGR.get(style, '')
+    body = f'{prefix}{sgr}{text}\x1b[0m' if sgr else f'{prefix}{text}'
+
+    out = ['', ' Preview', '', '  Kimi\'s own:', '', '    ✨ \x1b[1m' + text + '\x1b[0m',
+           '', '  Yours:', '']
+    if border == 'off':
+        out.append('    ' + body)
+    else:
+        tl, tr, bl, br, h, v = USER_FRAMES[border]
+        width = m.visible(body) + 2
+        if border == 'topbottom':
+            out += ['    ' + h * width, '    ' + body, '    ' + h * width]
+        else:
+            out += ['    ' + tl + h * width + tr,
+                    '    ' + v + ' ' + body + ' ' + v,
+                    '    ' + bl + h * width + br]
+    out += ['', '  ● The directory holds 123 files.']
+    return out
+
+
+def screen_user_message(st: State) -> m.Screen:
+    """The marker, the frame and the styling of your own messages."""
+    keys = SETTING_GROUPS['usermsg'][1]
+
+    def build(s: State) -> list[Item]:
+        note = (lambda q: lambda x: x.feature_note(q))(s.patch_file('user-message'))
+        rows = [Item('info', 'read while the patches are applied — '
+                             'a change here needs a patch run'),
+                Item('sep')]
+        for key in keys:
+            label, help_text, _ = PATCH_HELP[key]
+            value = switch_value(key)
+            if key in ps.CHOICES:
+                rows.append(Item('cycle', label, value, note, key=key,
+                                 choices=ps.CHOICES[key], help=help_text))
+            else:
+                rows.append(Item('action', label, value, note, key=key,
+                                 on_delete=restore,
+                                 help=help_text + '  (enter types one, '
+                                                  'backspace restores the default)'))
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
+        return rows
+
+    def restore(s: State, item: Item) -> None:
+        ps.set_value(item.key, ps.DEFAULTS[item.key], s.settings_path)
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key in keys and item.key not in ps.CHOICES:
+            current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
+            raw = ask(item.key, current,
+                      hint='`default` keeps Kimi\'s ✨, `none` removes it, '
+                           'anything else is used as written.')
+            if raw:
+                ps.set_value(item.key, raw, s.settings_path)
+        return True
+
+    def cyc(s: State, item: Item, forward: bool) -> None:
+        if item.key in ps.CHOICES:
+            ps.cycle(item.key, forward, s.settings_path)
+
+    return m.Screen(build, activate=act, cycle=cyc, reload=reload_state,
+                    aside=user_message_preview, help_line=m.HELP_DEL,
+                    title='User message display')
+
+
+# Three of the groups are not a list of switches but a thing you look at: a
+# spinner, a rotating word, a framed message. Each has a screen written for it,
+# and `SETTING_GROUPS` still owns which keys belong where — so the check that
+# every switch is reachable holds for these too.
+DEDICATED = {
+    'style': lambda st: screen_thinking_style(st),
+    'verbs': lambda st: screen_thinking_verbs(st),
+    'usermsg': lambda st: screen_user_message(st),
+}
 
 
 def screen_skills(st: State) -> m.Screen:
@@ -873,7 +1249,9 @@ def activate(st: State, item: Item) -> bool:
     k = item.key
     if k == 'quit':
         return False
-    if k in SETTING_GROUPS:
+    if k in DEDICATED:
+        sub(DEDICATED[k](st), st)
+    elif k in SETTING_GROUPS:
         sub(screen_settings(st, k), st)
     elif k == 'prompts':
         sub(screen_prompts(st), st)
@@ -1095,8 +1473,13 @@ def _selfcheck() -> int:
         rows_by_group = {g: screen_settings(st, g).build(st) for g in SETTING_GROUPS}
         for group, grows in rows_by_group.items():
             keys = SETTING_GROUPS[group][1]
+            # `fullscreen` is the one row on a switch screen that is not a
+            # patch switch: it is a launcher variable that moved here from
+            # the root menu, where it was the only row that changed a value
+            # rather than opening a door.
             check(f'{group}: one row per switch',
-                  [r.key for r in grows if r.selectable and r.key != 'back'] == keys,
+                  [r.key for r in grows if r.selectable
+                   and r.key not in ('back', 'fullscreen')] == keys,
                   [r.key for r in grows])
             check(f'{group}: every switch row carries help',
                   all(r.help for r in grows if r.key in keys),
@@ -1288,6 +1671,99 @@ def _selfcheck() -> int:
         check('environment screen lists variables', len(env_names) > 5, env_names)
         check('every environment row is a launcher variable',
               all(n.startswith('KIMI') for n in env_names), env_names)
+
+        # -- the previews describe the settings they are drawn beside -------
+        # A preview that does not follow the setting is worse than none: it
+        # invites a choice made on what it showed. So each is checked against
+        # the value it is supposed to be showing, not merely for existing.
+        # The real spinner and verb patches are copied in, because these
+        # screens read their tables out of the patch rather than keeping a
+        # copy — which is the property being checked.
+        import shutil
+        for real in (ROOT / 'patches').glob('7[01]-*.js'):
+            shutil.copy(real, root / 'patches' / real.name)
+            os.utime(root / 'patches' / real.name, (1000, 1000))
+
+        settings.write_text('')
+        st = state()
+        check('the spinner preview falls back to Kimi\'s own frames',
+              '⠋' in '\n'.join(spinner_preview(st)), spinner_preview(st)[:6])
+
+        ps.set_value('spinner_style', 'star', settings)
+        st = state()
+        check('choosing a preset shows that preset\'s frames',
+              '✻' in '\n'.join(spinner_preview(st)), spinner_preview(st))
+        check('and the frames come from the patch, not a copy here',
+              spinner_frames(st) == patch_table(st.patch_file('spinner'),
+                                                'PRESETS')['star'],
+              spinner_frames(st))
+
+        # Custom frames: written run together or spaced, they mean the same,
+        # and a frame of several characters needs the spaced form.
+        ps.set_value('spinner_style', 'custom', settings)
+        ps.set_value('spinner_frames', 'abc', settings)
+        check('run-together frames split per character',
+              spinner_frames(state()) == ['a', 'b', 'c'])
+        ps.set_value('spinner_frames', 'ab cd', settings)
+        check('spaced frames stay whole',
+              spinner_frames(state()) == ['ab', 'cd'])
+        ps.set_value('spinner_style', 'default', settings)
+        ps.set_value('spinner_frames', 'default', settings)
+
+        # The verbs, the same way: the built-in list is read out of the patch
+        # so the screen cannot offer words the patch will not use.
+        st = state()
+        built_in = verb_words(st)
+        check('the built-in verbs are read from the patch',
+              built_in == patch_list(st.patch_file('verbs'), 'BUILT_IN_VERBS'),
+              built_in[:3])
+        check('there are some', len(built_in) > 4, len(built_in))
+        ps.set_value('thinking_verbs_list', 'one, two , three', settings)
+        check('your own words are split and trimmed',
+              verb_words(state()) == ['one', 'two', 'three'], verb_words(state()))
+        ps.set_value('thinking_verbs_format', '{}…', settings)
+        check('the format reaches the preview',
+              'one…' in '\n'.join(verb_preview(state())), verb_preview(state()))
+        ps.set_value('thinking_verbs_list', 'default', settings)
+        ps.set_value('thinking_verbs_format', '{}', settings)
+
+        # The message preview draws the frame the setting names, and both the
+        # before and the after, because the point is the comparison.
+        ps.set_value('user_message_border', 'double', settings)
+        pv = '\n'.join(user_message_preview(state()))
+        check('the message preview draws the chosen frame', '╔' in pv and '╚' in pv, pv)
+        check('and still shows what Kimi does', 'Kimi\'s own' in pv)
+        ps.set_value('user_message_border', 'off', settings)
+        ps.set_value('user_message_marker', '▌', settings)
+        pv2 = '\n'.join(user_message_preview(state()))
+        check('the marker reaches the preview', '▌ ' in pv2, repr(pv2))
+        check('and Kimi\'s own marker is still shown next to it', '✨ ' in pv2)
+        ps.set_value('user_message_marker', 'none', settings)
+        check('`none` removes the marker without removing the text',
+              '✨' in '\n'.join(user_message_preview(state()))
+              and 'list the dir' in '\n'.join(user_message_preview(state())))
+        ps.set_value('user_message_marker', 'default', settings)
+
+        # A row on a dedicated screen writes the same file the generic one
+        # does — these three screens replace the rows, not the settings.
+        style_screen = screen_thinking_style(state())
+        srows = style_screen.build(state())
+        idx = next(i for i, r in enumerate(srows) if r.key == 'style:glow')
+        m.handle(style_screen, state(), srows, idx, 'enter')
+        check('picking a style row writes the setting',
+              ps.get('spinner_style', settings) == 'glow',
+              ps.get('spinner_style', settings))
+        ps.set_value('spinner_style', 'default', settings)
+
+        verbs_screen = screen_thinking_verbs(state())
+        vrows = verbs_screen.build(state())
+        first_word = next(r for r in vrows if r.key == 'verb:0')
+        m.handle(verbs_screen, state(), vrows, vrows.index(first_word), 'backspace')
+        check('backspace drops a word from the list',
+              len(verb_words(state())) == len(built_in) - 1,
+              len(verb_words(state())))
+        ps.set_value('thinking_verbs_list', 'default', settings)
+        settings.write_text('')
 
         # -- the status is only re-read when it could have changed ----------
         # Asking costs six seconds of hashing, and the menu reloads after

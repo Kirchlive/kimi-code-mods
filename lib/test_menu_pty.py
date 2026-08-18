@@ -38,7 +38,7 @@ sys.path.insert(0, {here!r})
 import menu as m
 from menu import Item, Screen
 
-state = {{'colour': 'red'}}
+state = {{'colour': 'red', 'typed': '(nothing)'}}
 CHOICES = ['red', 'green', 'blue']
 
 def build(st):
@@ -47,6 +47,7 @@ def build(st):
         Item('action', 'Beta', lambda s: 'second', key='b'),
         Item('sep'),
         Item('cycle', 'Colour', lambda s: s['colour'], key='colour', choices=CHOICES),
+        Item('action', 'Name', lambda s: s['typed'], key='name'),
         Item('action', 'Omega', lambda s: 'last', key='z'),
     ]
 
@@ -54,7 +55,13 @@ def cycle(st, item, forward):
     i = CHOICES.index(st['colour'])
     st['colour'] = CHOICES[(i + (1 if forward else -1)) % len(CHOICES)]
 
-m.loop(Screen(build, cycle=cycle, title='pty screen',
+def activate(st, item):
+    if item.key == 'name':
+        got = m.field('Name', hint='type something')
+        st['typed'] = '(escaped)' if got is None else repr(got)
+    return True
+
+m.loop(Screen(build, cycle=cycle, activate=activate, title='pty screen',
               help_line=m.HELP_ROOT), state)
 '''
 
@@ -182,6 +189,29 @@ def main() -> int:
         # is the one place that proves the real path does: a self-check that
         # renders without a terminal can only prove the opposite.
         check('the selected row is drawn in colour', '\x1b[1;36m' in s.buf)
+
+        # The field, which is the whole reason `input()` is gone. Typing an
+        # arrow key into it must leave no trace in the value: as a line reader
+        # it arrived as \x1b[C inside the string, and that string was written
+        # to config.toml, where the next parse threw on the escape byte.
+        s.type(b'\x1b[B')                             # down to the Name row
+        check('the field row is reachable', 'Name' in s.cursor(), s.cursor())
+        s.type(b'\r')
+        check('enter opens a bordered field', '╭' in s.buf.split('\x1b[2J')[-1])
+        s.type(b'ab')
+        s.type(b'\x1b[C\x1b[D\x1b[A')                 # arrows: navigation, not text
+        s.type(b'c')
+        s.type(b'\x7f')                               # backspace deletes one
+        s.type(b'\r')
+        check('the field returns what was typed', "'ab'" in s.cursor(), s.cursor())
+        check('and no escape byte reached the value',
+              '\\x1b' not in s.cursor() and '^[' not in s.cursor(), s.cursor())
+
+        s.type(b'\r')
+        s.type(b'xy')
+        s.type(b'\x1b')                               # escape cancels outright
+        check('escape leaves the value alone',
+              '(escaped)' in s.cursor(), s.cursor())
 
         # Leaving has to give it back, or the shell you return to has no
         # cursor. Typing q ends the loop, whose `finally` shows it again.
