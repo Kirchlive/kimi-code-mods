@@ -247,16 +247,24 @@ def tint(text: str, hex_value: str) -> str:
     return f'{code}{text}\x1b[0m' if code else text
 
 
-def embolden(line: str) -> str:
-    """The same line in bold, without losing any of its colours.
+# Bold *and* underlined. Bold alone is a real difference but not a reliable
+# one: at small sizes, on a light palette, or next to text that is already
+# emphasised it can be hard to be sure which line moved. An underline is
+# positional rather than a matter of weight, so the two together answer the
+# question at a glance instead of after a second look.
+STANDOUT = '\x1b[1;4m'
 
-    Bold cannot simply wrap the line: each coloured run already ends in a
-    reset, and a reset clears weight along with colour — so a single `1m` in
-    front would survive exactly as far as the first `tint`. Setting it again
-    after every reset is what makes the whole line heavy rather than its first
-    few characters.
+
+def embolden(line: str) -> str:
+    """The same line made to stand out, without losing any of its colours.
+
+    The styling cannot simply wrap the line: each coloured run already ends in
+    a reset, and a reset clears weight and underline along with colour — so a
+    single sequence in front would survive exactly as far as the first `tint`.
+    Setting it again after every reset is what carries it across the whole
+    line rather than its first few characters.
     """
-    return '\x1b[1m' + line.replace('\x1b[0m', '\x1b[0m\x1b[1m') + '\x1b[0m'
+    return STANDOUT + line.replace('\x1b[0m', '\x1b[0m' + STANDOUT) + '\x1b[0m'
 
 
 # What a Kimi session looks like, in the tokens that colour it. Every line is
@@ -328,7 +336,7 @@ def preview(palette: dict, highlight: str = '') -> list[str]:
     if highlight:
         drawn = frame_lit or any(highlight in owner.split()
                                  for owner, _ in body if owner)
-        out += ['', f'  {highlight} draws the bold line' if drawn else
+        out += ['', f'  {highlight} draws the marked line' if drawn else
                 f'  {highlight} draws nothing in this preview']
     return out
 
@@ -860,22 +868,24 @@ def _selfcheck() -> int:
         # only an arrow: the line itself is what you are looking at.
         marked = preview(BUILT_IN['dark'], 'roleUser')
         check('the edited token is marked', any('◀' in l for l in marked))
-        check('and its line is drawn bold',
-              any('\x1b[1m' in l and 'list the dir' in l for l in marked),
+        check('and its line is drawn bold and underlined',
+              any(STANDOUT in l and 'list the dir' in l for l in marked),
               [l for l in marked if 'list the dir' in l])
         check('and named under the frame',
               any('roleUser' in l for l in marked), marked[-2:])
-        check('only that line is bold',
-              len([l for l in marked if '\x1b[1m' in l]) == 1,
-              [m.ANSI.sub('', l) for l in marked if '\x1b[1m' in l])
+        check('only that line stands out',
+              len([l for l in marked if STANDOUT in l]) == 1,
+              [m.ANSI.sub('', l) for l in marked if STANDOUT in l])
 
         # Bold has to survive the colours already in the line: each coloured
         # run ends in a reset, and a reset clears weight too, so a single
         # bold in front would stop at the first one.
         line = tint('a', '#ff0000') + tint('b', '#00ff00')
         heavy = embolden(line)
-        check('every coloured run in a line is emboldened',
-              heavy.count('\x1b[1m') == 3, heavy.count('\x1b[1m'))
+        check('every coloured run in a line carries the styling',
+              heavy.count(STANDOUT) == 3, heavy.count(STANDOUT))
+        check('and it is bold and underlined, not one or the other',
+              STANDOUT == '\x1b[1;4m', STANDOUT)
         check('and the text is unchanged', m.ANSI.sub('', heavy) == 'ab',
               m.ANSI.sub('', heavy))
         check('bolding does not change how wide a line is',
@@ -884,7 +894,7 @@ def _selfcheck() -> int:
         # `text` is a token and so is `textDim`; a substring match would
         # bold the wrong line every time the plain one is selected.
         only_dim = preview(BUILT_IN['dark'], 'textDim')
-        bold_dim = [m.ANSI.sub('', l) for l in only_dim if '\x1b[1m' in l]
+        bold_dim = [m.ANSI.sub('', l) for l in only_dim if STANDOUT in l]
         check('a token is matched as a whole word',
               all('Read' not in l for l in bold_dim), bold_dim)
         check('and textDim finds its own lines', len(bold_dim) == 2, bold_dim)
@@ -892,8 +902,8 @@ def _selfcheck() -> int:
         plain = preview(BUILT_IN['dark'])
         check('with nothing to mark, nothing is marked',
               not any('◀' in l for l in plain))
-        check('and nothing is bold',
-              not any('\x1b[1m' in l for l in plain))
+        check('and nothing stands out',
+              not any(STANDOUT in l for l in plain))
 
         # The screen hands the cursor's row to the preview, which is what
         # makes any of this follow the selection.
@@ -911,11 +921,11 @@ def _selfcheck() -> int:
         # what goes bold — the one token whose highlight would otherwise
         # point at an empty row.
         framed = preview(BUILT_IN['dark'], 'border')
-        check('selecting border emboldens the frame',
-              '\x1b[1m' in framed[3] and framed[3].rstrip().endswith('◀'),
+        check('selecting border makes the frame stand out',
+              STANDOUT in framed[3] and framed[3].rstrip().endswith('◀'),
               m.ANSI.sub('', framed[3]))
         check('and says so rather than calling it missing',
-              any('draws the bold line' in l for l in framed), framed[-2:])
+              any('draws the marked line' in l for l in framed), framed[-2:])
         check('and neither does no row at all',
               not any('◀' in l for l in scr_tok.aside(st_tok, None)))
 

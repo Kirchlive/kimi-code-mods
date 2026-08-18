@@ -185,12 +185,15 @@ saturation, lightness, each *in* the colours it selects — with ←→ to nudge
 shift+←→ for ten at a time, `a` to switch to RGB when a value has to match
 something exact, `p` to lift a hex value out of the clipboard and `h` to type
 one. Beside it runs the same mock transcript the theme editor shows, following
-the bars as they move, with the line that token draws **in bold** and `◀`
-against it. The theme editor does the same from its list: move the cursor down
-the nineteen tokens and the preview follows, so the answer to "which one is
-that" is one keypress rather than trial and error. `border` draws the frame
-around the whole preview rather than a line inside it, so selecting it
-emboldens the frame.
+the bars as they move, with the line that token draws **bold and underlined**
+and `◀` against it. Bold alone is a real difference but not a reliable one —
+on a light palette or beside text that is already emphasised it takes a second
+look; an underline is positional rather than a matter of weight, so the two
+together answer the question at a glance. The theme editor does the same from
+its list: move the cursor down the nineteen tokens and the preview follows, so
+"which one is that" costs one keypress rather than trial and error. `border`
+draws the frame around the whole preview rather than a line inside it, so
+selecting it marks the frame.
 
 Every colour in Kimi comes from the palette, so the screens whose look depends
 on one — your own messages, the spinner, the composer frame — carry a
