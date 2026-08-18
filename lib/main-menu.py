@@ -542,14 +542,18 @@ def config_item(st: State, item: str) -> None:
         m.press_any()
 
 
-def ask(title: str, value: str = '', hint: str = ''):
+def ask(title: str, value: str = '', hint: str = '', width: int | None = None):
     """One typed value, in a field. `None` means the user changed their mind.
 
     Never `input()`: a line read in cooked mode takes an arrow key as the
     bytes of its escape sequence and hands them back inside the string. See
     `menu.field`, which is where that crash is explained and prevented.
+
+    `width` is the field's own width, for the values that are known to be
+    short. A marker is one character; a box wide enough for a command line
+    around it suggests there is more to say than there is.
     """
-    return m.field(title, value, hint)
+    return m.field(title, value, hint, width) if width else m.field(title, value, hint)
 
 
 def sub(screen: m.Screen, st: State) -> None:
@@ -1108,6 +1112,11 @@ STYLE_SGR = {'default': '\x1b[1m', 'plain': '', 'italic': '\x1b[3m',
 # marker that does not already end in one.
 KIMI_MARKER = '✨'
 
+# A marker is a character or two. The general field is wide enough for a path
+# or a command, and a box that size in front of one glyph suggests there is
+# more to say than there is.
+MARKER_FIELD_WIDTH = 10
+
 
 def marker_value(st: State) -> str:
     """The marker itself, rather than the word `default`.
@@ -1235,7 +1244,8 @@ def screen_user_message(st: State) -> m.Screen:
             current = str(s.settings.get(item.key, ps.DEFAULTS[item.key]))
             typed = ask('Your message marker', marker_field(current),
                         hint='What sits in front of your own messages. '
-                             'Leave the field empty for no marker at all.')
+                             'Leave the field empty for no marker at all.',
+                        width=MARKER_FIELD_WIDTH)
             value = marker_setting(typed)
             if value is not None:
                 ps.set_value(item.key, value, s.settings_path)
