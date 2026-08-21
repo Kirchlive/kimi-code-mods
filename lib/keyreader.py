@@ -165,6 +165,28 @@ def raw_mode(stream=None, mouse: bool = False):
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
+def drain_input(stream=None) -> None:
+    """Throw away whatever was typed while something else held the terminal.
+
+    A long-running command runs in cooked mode with echo on, so keys pressed
+    while it works are echoed into its output and then left in the input queue.
+    Coming back to the menu, those bytes read as navigation: three impatient
+    arrows move the cursor three rows and a stray Return opens whatever they
+    landed on. Nothing typed at a command that was not listening is worth
+    keeping, so the queue is emptied before the menu reads again.
+
+    This is the opposite call from `raw_mode`'s deliberate `TCSANOW`, and for
+    the opposite reason: there, the keys were meant for the menu.
+    """
+    stream = stream or sys.stdin
+    if not HAVE_TERMIOS or not stream.isatty():
+        return
+    try:
+        termios.tcflush(stream.fileno(), termios.TCIFLUSH)
+    except (termios.error, ValueError):     # pragma: no cover - closed stdin
+        pass
+
+
 class _FdStream:
     """Reads straight from a descriptor, with nothing buffered in between.
 
@@ -506,6 +528,11 @@ def _selfcheck() -> int:
 
     # A multi-byte character survives being read one byte at a time.
     assert over_a_pipe('ü'.encode()) == 'ü', repr(over_a_pipe('ü'.encode()))
+
+    # Dropping the input queue is a no-op on anything that is not a terminal,
+    # which is how it behaves in a pipeline and in this selfcheck.
+    with open(os.devnull) as devnull:
+        drain_input(devnull)
 
     print('keyreader selfcheck: ok')
     return 0

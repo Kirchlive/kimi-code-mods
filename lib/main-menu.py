@@ -43,7 +43,8 @@ sys.path.insert(0, str(HERE))
 
 import menu as m                                             # noqa: E402
 import patch_settings as ps                                  # noqa: E402
-from keyreader import FakeKeys, Mouse, read_key, sgr         # noqa: E402
+from keyreader import (FakeKeys, Mouse, drain_input,        # noqa: E402
+                       read_key, sgr)
 from menu import Item, first_selectable, move                # noqa: E402
 from oscruft import is_os_cruft, usable_files                # noqa: E402
 
@@ -467,10 +468,21 @@ def draw(st: State, items: list[Item], cursor: int) -> dict:
 # --------------------------------------------------------------------------
 
 
-def run(cmd: list[str], root: Path) -> None:
-    """Hand the terminal over to a component, then come back."""
+def run(cmd: list[str], root: Path, wait: bool = True) -> None:
+    """Hand the terminal over to a component, then come back.
+
+    `wait` is for the commands whose output *is* the result — a cost report is
+    read on screen and nowhere else, so the menu waits before repainting over
+    it. A patch run reports its own outcome in the header you come back to, so
+    it returns straight to the menu.
+
+    Either way the input queue is dropped: a command that ran for a minute has
+    collected every key pressed at it, and the menu must not read them.
+    """
     subprocess.run(cmd, cwd=str(root))
-    m.press_any()
+    drain_input()
+    if wait:
+        m.press_any()
 
 
 def open_file(path: Path) -> None:
@@ -1538,9 +1550,9 @@ def activate(st: State, item: Item) -> bool:
     elif k == 'cost':
         run([sys.executable, str(HERE / 'prompt-cost.py'), str(st.prompt_dir)], st.root)
     elif k == 'apply':
-        run([str(st.root / 'kimi-patch.sh')], st.root)
+        run([str(st.root / 'kimi-patch.sh')], st.root, wait=False)
     elif k == 'restore':
-        run([str(st.root / 'kimi-patch.sh'), '--restore'], st.root)
+        run([str(st.root / 'kimi-patch.sh'), '--restore'], st.root, wait=False)
     elif k == 'open-config':
         open_file(st.config_path)
     elif k == 'open-env':
