@@ -57,11 +57,15 @@ SHOW_CURSOR = '\x1b[?25h'
 EDIT_CURSOR = '|'
 
 # tweakcc draws the row you are on in bold cyan and everything it says *about*
-# that row dimmed. Worth copying exactly: the mark alone is one character wide
-# and easy to lose on a full screen, and dimming the explanation stops it
-# competing with the rows for attention.
+# that row dimmed. The mark alone is one character wide and easy to lose on a
+# full screen, so the colour is what actually carries the selection.
 SELECTED = '\x1b[1;36m'
 DIM = '\x1b[2m'
+# The sentence explaining the selected row, in the selection's own colour but
+# not bold. Dimmed, it read as disabled text and was the first thing to get
+# lost on a dark terminal; tying it to the cyan says what it belongs to, and
+# dropping the bold keeps it from competing with the row itself.
+HELP = '\x1b[36m'
 RESET = '\x1b[0m'
 
 
@@ -286,7 +290,7 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
     lines.append('')
     sel = items[cursor] if 0 <= cursor < len(items) else None
     if sel is not None and sel.help and not screen.inline_help:
-        lines.append(paint(f'  {sel.help}', DIM, color))
+        lines.append(paint(f'  {sel.help}', HELP, color))
         lines.append('')
     lines.append(paint(screen.help_line, DIM, color))
     return lines
@@ -1082,6 +1086,16 @@ def _selfcheck() -> int:
           not any(l.startswith(SELECTED) for n, l in enumerate(tinted)
                   if n != row_map_line(items, start, tinted)), tinted)
     check('the help line is dimmed', tinted[-1].startswith(DIM), tinted[-1])
+
+    # A submenu explains the selected row on its own line, and that sentence
+    # is tinted like the selection rather than dimmed like the key hints.
+    explained = Screen(lambda st: [Item('action', 'Only', key='only',
+                                        help='What it does.')],
+                       inline_help=False)
+    said = render(explained, store, explained.build(store), 0, color=True)
+    check('a submenu explains in the selection colour',
+          any(line.startswith(HELP) and 'What it does.' in line
+              for line in said), said)
 
     # -- the mouse mapping is the drawing ----------------------------------
     check('every selectable row is mapped',
