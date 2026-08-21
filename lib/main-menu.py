@@ -2056,9 +2056,12 @@ def _selfcheck() -> int:
         check('every entry is mapped',
               len(row_map) == len([i for i in items if i.selectable]), len(row_map))
         for line_no, item_idx in row_map.items():
+            # Compared against the drawn form: a label is capitalised on its
+            # way to the screen, so the raw string is no longer what is there.
+            drawn = m.title_case(items[item_idx].label)
             check('mapped line holds its entry',
-                  items[item_idx].label in lines[line_no],
-                  f'line {line_no}: {lines[line_no]!r} vs {items[item_idx].label!r}')
+                  drawn in lines[line_no],
+                  f'line {line_no}: {lines[line_no]!r} vs {drawn!r}')
 
         # Lines that are not entries must not be in the mapping at all.
         sep_lines = [n for n, l in enumerate(lines) if l.startswith('  ─')]
@@ -2163,12 +2166,14 @@ def _selfcheck() -> int:
             # The mouse mapping is built by the same pass that draws.
             row_map2: dict[int, int] = {}
             lines2 = m.render(screen, st, rows, m.first_selectable(rows), row_map2)
-            check(f'{name}: title drawn', any(screen.title in l for l in lines2))
+            check(f'{name}: title drawn',
+                  any(m.title_case(screen.title) in l for l in lines2))
             check(f'{name}: every selectable row mapped',
                   len(row_map2) == len([r for r in rows if r.selectable]))
             for line_no, ri in row_map2.items():
                 check(f'{name}: mapped line holds its row',
-                      rows[ri].label in lines2[line_no], lines2[line_no])
+                      m.title_case(rows[ri].label) in lines2[line_no],
+                      lines2[line_no])
             check(f'{name}: esc leaves', m.handle(screen, st, rows, 0, 'esc')[1] is False)
 
         # the patch screen names the patches that are actually there

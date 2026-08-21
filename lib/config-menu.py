@@ -1393,7 +1393,7 @@ def screen_thinking(st: Editing) -> m.Screen:
 
 
 def header(st: Editing) -> list[str]:
-    return ['', 'kimi-code-mods — Kimi configuration', str(st.path)]
+    return ['', 'kimi-code-mods — Kimi Configuration', str(st.path)]
 
 
 def screen_main(st: Editing) -> m.Screen:
@@ -1729,7 +1729,7 @@ def _selfcheck():
 
         st = editing()
         screens = [
-            ('main', screen_main(st), 'kimi-code-mods — Kimi configuration'),
+            ('main', screen_main(st), 'kimi-code-mods — Kimi Configuration'),
             ('tools', screen_tools(st, CATALOGUE), 'Disable builtin tools'),
             ('skills', screen_bool(st, K_BUILTIN_SKILLS, 'Builtin product skills',
                                    ['what the skills are']), 'Builtin product skills'),
@@ -1767,11 +1767,16 @@ def _selfcheck():
             # be checked against the drawn lines rather than a second model.
             row_map: dict[int, int] = {}
             lines = m.render(screen, st, rows, m.first_selectable(rows), row_map)
-            ok(f'{name}: {marker!r} drawn', any(marker in l for l in lines))
+            # Labels are capitalised on their way to the screen, so both the
+            # marker and the mapping are compared against the drawn form.
+            # The marker is sometimes a title and sometimes a row label, and
+            # both are drawn capitalised.
+            ok(f'{name}: {marker!r} drawn',
+               any(m.title_case(marker) in l for l in lines))
             ok(f'{name}: every selectable row is mapped',
                len(row_map) == len([r for r in rows if r.selectable]), len(row_map))
             astray = [lines[n] for n, ri in row_map.items()
-                      if rows[ri].label not in lines[n]]
+                      if m.title_case(rows[ri].label) not in lines[n]]
             ok(f'{name}: every mapped line holds its row', not astray, astray[:1])
 
         # -- tools: toggling and saving ------------------------------------

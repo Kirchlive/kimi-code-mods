@@ -221,7 +221,7 @@ class Screen:
         # screen's title string, so no screen can be the one that forgets.
         if self._header is not None:
             return list(self._header(st))
-        return ['', ' ' + self.title] if self.title else ['']
+        return ['', ' ' + title_case(self.title)] if self.title else ['']
 
     def activate(self, st, item) -> bool:
         # The one place a row hands the terminal to something else: an editor,
@@ -289,6 +289,40 @@ class Screen:
 # --------------------------------------------------------------------------
 
 
+def title_case(text: str) -> str:
+    """Every word capitalised, for the things a menu names rather than says.
+
+    Applied to row labels and screen titles, never to values, help sentences
+    or `info` rows — those are prose, and prose in title case reads as a
+    headline that will not end.
+
+    Three kinds of word are left exactly as they are: one that already carries
+    a capital somewhere (`AGENTS.md`, `Kimi`, `TOML`), one that holds a dot
+    (`config.toml`, `bundle.js`), and one that holds an underscore
+    (`max_attempts_per_step`). All three name something outside this menu — a
+    file, a product, a key in Kimi's own config — and a row reading
+    `Max_attempts_per_step` names a key that does not exist.
+
+    A word hyphenated more than once is a slug: `kimi-code-mods` is the
+    program, not three words, and is left alone too. A single hyphen is an
+    ordinary compound, so both halves are capitalised and `reverse-mirror`
+    reads `Reverse-Mirror`.
+    """
+    def one(word: str) -> str:
+        if not word or not word[0].isalpha():
+            return word
+        if '.' in word or '_' in word or any(c.isupper() for c in word):
+            return word
+        return word[0].upper() + word[1:]
+
+    def cap(word: str) -> str:
+        if word.count('-') > 1 and word.islower():
+            return word
+        return '-'.join(one(part) for part in word.split('-'))
+
+    return ' '.join(cap(w) for w in text.split(' '))
+
+
 def _put_frame(lines: list[str], frames: tuple[str, ...],
                frame: int) -> tuple[int, int] | None:
     """Fill in the animated cell, and say where it landed.
@@ -351,14 +385,17 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
         arrows = ' ‹›' if (it.kind == 'cycle' or it.on_cycle) else '   '
         if row_map is not None:
             row_map[len(lines)] = i
+        # The label is a name, so it is capitalised; the value beside it and
+        # the help behind it are not, because they are prose.
+        label = title_case(it.label)
         if screen.inline_help:
-            row = f'{mark} {it.label}'
+            row = f'{mark} {label}'
             if value:
-                row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
+                row = f'{mark} {label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
             if i == cursor and it.help:
                 row = clip(f'{row} - {it.help}', (width or terminal_width()) - 1)
         else:
-            row = f'{mark} {it.label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
+            row = f'{mark} {label:<{LABEL_WIDTH}}{arrows} {value}'.rstrip()
         lines.append(paint(row, SELECTED, color) if i == cursor else row)
 
     # The preview goes beside the rows, and only the rows. The two lines that
@@ -1203,7 +1240,10 @@ def _selfcheck() -> int:
     # -- rendering ---------------------------------------------------------
     row_map: dict[int, int] = {}
     lines = render(screen, store, items, start, row_map)
-    check('title drawn', any('test screen' in l for l in lines))
+    # The title is a name, so it is drawn capitalised — the screen is built
+    # with 'test screen' and reads 'Test Screen'.
+    check('title drawn, capitalised',
+          any('Test Screen' in l for l in lines), lines[:3])
     check('cursor drawn', any(CURSOR in l for l in lines))
     check('separator drawn', any(l.startswith('  ─') for l in lines))
     check('info row drawn', any('a fact nobody selects' in l for l in lines))

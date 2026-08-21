@@ -823,7 +823,8 @@ def _selfcheck() -> int:
                   len(rmap) == len([r for r in rows if r.selectable]))
             for line_no, ri in rmap.items():
                 check(f'{label}: mapped line holds its row',
-                      rows[ri].label in lines[line_no], lines[line_no])
+                      m.title_case(rows[ri].label) in lines[line_no],
+                      lines[line_no])
 
         # -- the theme in use ------------------------------------------------
         # It lives in tui.toml, not config.toml — Kimi splits its settings and
