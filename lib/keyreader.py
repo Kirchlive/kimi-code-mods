@@ -325,11 +325,21 @@ def read_key(stream=None):
     Clicks are reported on **release**. The press is swallowed, which keeps the
     two halves of one click from arriving as two events, and a release on a
     different row than the press is dropped as a drag rather than acted on.
+
+    Ctrl-C arrives one of two ways and leaves the same way. `tty.setcbreak`
+    keeps ISIG on, so a terminal that owns the key turns it into SIGINT and
+    the read is interrupted rather than handed a byte; where it is delivered
+    as `\\x03` instead, the byte is read normally. Both become `ctrl-c`, which
+    every caller already treats as "leave this screen" — the alternative was
+    a traceback printed over the menu.
     """
     stream = _unbuffered(stream)
     press_row = None
     while True:
-        ch = stream.read(1)
+        try:
+            ch = stream.read(1)
+        except KeyboardInterrupt:
+            return 'ctrl-c'
         if ch == '':
             return 'eof'
         if ch == '\x03':

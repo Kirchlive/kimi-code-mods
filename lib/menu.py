@@ -1038,12 +1038,20 @@ def loop(screen: Screen, st) -> int:
             # wait starts again. A key ends it immediately, so the animation
             # costs no latency — `read_key` is called the moment there is
             # something to read.
+            #
+            # Ctrl-C interrupts the wait itself rather than arriving as a
+            # byte, so it is caught here as well as inside `read_key` and
+            # answered with the same key name. Without it, closing the menu
+            # with Ctrl-C printed a traceback across the screen.
             with raw_mode(mouse=True):
-                while (spin_at is not None
-                       and not key_ready(timeout=screen.frame_interval)):
-                    frame += 1
-                    spin_once(frame)
-                key = read_key()
+                try:
+                    while (spin_at is not None
+                           and not key_ready(timeout=screen.frame_interval)):
+                        frame += 1
+                        spin_once(frame)
+                    key = read_key()
+                except KeyboardInterrupt:
+                    key = 'ctrl-c'
 
             # Enter on a row that is typed into edits it where it stands,
             # rather than opening a screen that hides the list it belongs to.
