@@ -68,7 +68,11 @@ CHOICES = {
     # answer first, then the ways to depart from it. `follow` is the value the
     # setting starts on, which the note beside the row says; being second in
     # the list does not make it less the default.
-    'working_style': ['default', 'follow', 'braille', 'dots', 'moon', 'blocks',
+    # No `moon` here: `default` already is Kimi's moon, and offering the same
+    # frames twice under two names asks the reader to spot that they are the
+    # same. The patch still accepts `working_style = moon` from a file written
+    # by hand — it is the menu that has nothing to add by listing it.
+    'working_style': ['default', 'follow', 'braille', 'dots', 'blocks',
                       'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
     'working_mirror': ['off', 'on'],
     # A duration is a number, but only a handful of them are worth having: below
