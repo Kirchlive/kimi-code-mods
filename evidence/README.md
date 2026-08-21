@@ -10,12 +10,12 @@ command shape:
 ```toml
 [[hooks]]
 event = "SessionStart"
-command = "echo session-start $(date +%H:%M:%S) >> /tmp/tweakkimi-hook-proof.txt"
+command = "echo session-start $(date +%H:%M:%S) >> /tmp/kimi-code-mods-hook-proof.txt"
 timeout = 10
 
 [[hooks]]
 event = "PreToolUse"
-command = "echo pre-tool-use $(date +%H:%M:%S) >> /tmp/tweakkimi-hook-proof.txt"
+command = "echo pre-tool-use $(date +%H:%M:%S) >> /tmp/kimi-code-mods-hook-proof.txt"
 timeout = 10
 ```
 

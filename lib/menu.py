@@ -1,6 +1,6 @@
 """One navigable screen, and the loop that drives it.
 
-Every screen in tweakkimi is the same thing: a header, a list of rows, and a
+Every screen in kimi-code-mods is the same thing: a header, a list of rows, and a
 help line. What differs is which rows and what they do. That is the whole
 reason this module exists — the navigation was written once for the main menu
 and every submenu underneath it then fell back to `input()` and digits, so the
@@ -139,7 +139,7 @@ class Screen:
 
     `build(st)` returns the rows. It is called again after every action, so a
     row's value is read from the file that owns it rather than remembered here
-    — the same rule the rest of tweakkimi follows, and the reason a change made
+    — the same rule the rest of kimi-code-mods follows, and the reason a change made
     by an external editor shows up the moment you come back.
 
     `activate(st, item)` runs a row and returns False to close the screen.

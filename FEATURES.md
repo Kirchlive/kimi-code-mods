@@ -1,10 +1,10 @@
-# tweakkimi — Funktionsliste
+# kimi-code-mods — Funktionsliste
 
 Eine Zeile je Funktion: `Name | Mechanismus | Status`. Daraus lässt sich das
 Menü eines CLI bauen, deshalb die Reihenfolge, in der man den Funktionen
 begegnet.
 
-Aufgenommen wird, was tweakkimi patcht oder freischaltet. Kimis eigene
+Aufgenommen wird, was kimi-code-mods patcht oder freischaltet. Kimis eigene
 Oberfläche steht in `FINDINGS.md` und taucht hier nur auf, wo der Gewinn groß
 genug für einen Menüeintrag ist — diese Zeilen sind mit `built-in` markiert.
 
@@ -35,7 +35,7 @@ beobachtet · `offen` noch nicht gebaut.
 20. Modell je Subagent          | built-in: [secondary_model], config-menu 9 | ungetestet
 
 21. Konfigurations-Untermenü    | kimi-patch.sh --config-menu               | done
-29. Haupt-CLI (Dach über allem) | ./tweakkimi.sh bzw. --menu                | done
+29. Haupt-CLI (Dach über allem) | ./kimi-code-mods.sh bzw. --menu                | done
 30. Cursor per Klick setzen     | patches/40-…, click_cursor in patch-settings.conf | done
 31. Arbeitsverzeichnis wechseln | patches/30-wd-command.js (neue Sitzung)   | done
 26. Launcher für Env-Schalter   | bin/kimi + env-profile.conf, --env        | done
@@ -116,7 +116,7 @@ tweakcc macht das so, und `isSuppressed` ist dort nichts weiter als
 
 **Per-Skill-Schalter.** Kimis einziger Hebel dafür ist der Frontmatter-Schlüssel
 `disable-model-invocation` in der Skill-Datei selbst. Ein Menü, das den setzt,
-bearbeitet fremde Inhalte statt tweakkimis eigene Konfiguration — eine andere
+bearbeitet fremde Inhalte statt kimi-code-modss eigene Konfiguration — eine andere
 Art von Eingriff als alles andere hier. Global geht es weiter über
 `builtin_product_skills` und `extra_skill_dirs`.
 
@@ -206,8 +206,8 @@ kurzschließenden `&&` läuft die Methode gar nicht erst an — auch ihr
 Fehler-Logging nicht. Erst ein Protokolleintrag **vor** der Bedingung trennte
 „Zweig nie erreicht" von „Flag blockiert".
 
-Diagnose bleibt eingebaut, aber still: `TWEAKKIMI_CLICK_DEBUG=1` schreibt
-Flags, Klickkoordinaten und Abbruchgründe nach `/tmp/tweakkimi-click.log`.
+Diagnose bleibt eingebaut, aber still: `KIMICODEMODS_CLICK_DEBUG=1` schreibt
+Flags, Klickkoordinaten und Abbruchgründe nach `/tmp/kimi-code-mods-click.log`.
 
 Zum Ausgangspunkt der Recherche: **Claude Code kann das nicht.** Sein Bundle
 enthält null Maus-Aktivierungssequenzen; was es im Vollbildmodus bietet, ist

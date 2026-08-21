@@ -9,7 +9,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROFILE="${TWEAKKIMI_PROFILE:-$HERE/env-profile.conf}"
+PROFILE="${KIMICODEMODS_PROFILE:-$HERE/env-profile.conf}"
 LAUNCHER="$HERE/bin/kimi"
 
 # Kimi's own defaults, so `show` can mark what actually deviates. Read from the

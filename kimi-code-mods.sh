@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tweakkimi — the top-level menu.
+# kimi-code-mods — the top-level menu.
 #
 # A thin door to lib/main-menu.py, which reads its state from the same files
 # everything else here writes: config.toml, env-profile.conf, patches/,

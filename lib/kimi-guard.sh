@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# tweakkimi guard — notice when Kimi has replaced its own binary, and put the
+# kimi-code-mods guard — notice when Kimi has replaced its own binary, and put the
 # patches back.
 #
 # Kimi updates itself in place: it moves the running binary aside to kimi.bak
-# and writes a fresh one. Everything tweakkimi did is gone at that moment, and
+# and writes a fresh one. Everything kimi-code-mods did is gone at that moment, and
 # nothing says so — the CLI still starts, it is just stock again. That happened
 # within an hour of the first patch run, so it is the normal case, not an edge
 # one. KIMI_CLI_NO_AUTO_UPDATE=1 avoids it by never updating at all, which is a
@@ -27,11 +27,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 BIN="${KIMI_BIN:-$HOME/.kimi-code/bin/kimi}"
-DATA="${TWEAKKIMI_DATA:-$ROOT}"
+DATA="${KIMICODEMODS_DATA:-$ROOT}"
 BASELINE_DIR="$DATA/baseline"
 STATE="$DATA/state.json"
 CACHE="$DATA/.work/guard-cache"
-PATCHER="${TWEAKKIMI_PATCHER:-$ROOT/kimi-patch.sh}"
+PATCHER="${KIMICODEMODS_PATCHER:-$ROOT/kimi-patch.sh}"
 
 # Verdict codes. Deliberately above the range a shell command uses for its own
 # failures, so a crashed guard is never mistaken for a diagnosis.
@@ -56,7 +56,7 @@ usage: $(basename "$0") <check|repair|plist|help> [--quiet]
           binary; see the README for the install command
 
 env: KIMI_BIN         binary to watch (default \$HOME/.kimi-code/bin/kimi)
-     TWEAKKIMI_DATA   state directory (default the tweakkimi checkout)
+     KIMICODEMODS_DATA   state directory (default the kimi-code-mods checkout)
 EOF
 }
 
@@ -89,14 +89,14 @@ sys.exit(0 if d else 1)' "$STATE" 2>/dev/null
 # Is a Kimi process using this binary right now? Anchored so the guard and the
 # patcher, whose own command lines mention neither, cannot match themselves.
 kimi_running() {
-  [ "${TWEAKKIMI_GUARD_ASSUME_RUNNING:-0}" = 1 ] && return 0
+  [ "${KIMICODEMODS_GUARD_ASSUME_RUNNING:-0}" = 1 ] && return 0
   pgrep -f "^${BIN}( |$)" >/dev/null 2>&1
 }
 
 notify() {  # best effort; never a reason to fail
-  [ "${TWEAKKIMI_GUARD_QUIET:-0}" = 1 ] && return 0
+  [ "${KIMICODEMODS_GUARD_QUIET:-0}" = 1 ] && return 0
   command -v osascript >/dev/null 2>&1 || return 0
-  osascript -e "display notification \"$1\" with title \"tweakkimi\"" >/dev/null 2>&1 || true
+  osascript -e "display notification \"$1\" with title \"kimi-code-mods\"" >/dev/null 2>&1 || true
 }
 
 # --------------------------------------------------------------------- verdict
@@ -181,7 +181,7 @@ cached_verdict() {
 # An installer writing 180 MB takes a moment, and launchd fires on the first
 # byte. Wait for the file to hold still before judging it.
 settle() {
-  local interval="${TWEAKKIMI_GUARD_SETTLE:-2}" prev='' cur i
+  local interval="${KIMICODEMODS_GUARD_SETTLE:-2}" prev='' cur i
   [ "$interval" = 0 ] && return 0
   for i in 1 2 3 4 5; do
     cur="$(file_id "$BIN")"
@@ -261,7 +261,7 @@ do_plist() {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.tweakkimi.guard</string>
+  <string>com.kimi-code-mods.guard</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>

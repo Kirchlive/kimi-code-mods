@@ -1,4 +1,4 @@
-// tweakkimi patch — give command output previews half the terminal height.
+// kimi-code-mods patch — give command output previews half the terminal height.
 //
 // Kimi caps every preview of command and tool output at a small fixed number of
 // lines, chosen when the code was written rather than from the window you are

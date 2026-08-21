@@ -9,7 +9,7 @@
 # puts the patches back. It needs a real Mach-O and two full patch runs, so it
 # costs a couple of minutes and lives behind `./test.sh --full`.
 #
-# Everything happens in a sandbox: `TWEAKKIMI_DATA` and `KIMI_BIN` point at a
+# Everything happens in a sandbox: `KIMICODEMODS_DATA` and `KIMI_BIN` point at a
 # temporary directory with its own copy of the baseline, so the installed Kimi
 # is never touched. That is the same mechanism the rest of the suite uses, and
 # the reason this can be run on a working machine without a second thought.
@@ -42,8 +42,8 @@ cp "$BASELINE" "$D/kimi"
 # its line numbers removed.
 printf 'agents_md_names = all\nread_line_numbers = off\n' > "$D/patch-settings.conf"
 
-guard() { TWEAKKIMI_DATA="$D" KIMI_BIN="$D/kimi" bash "$HERE/kimi-guard.sh" "$@"; }
-patch() { TWEAKKIMI_DATA="$D" KIMI_BIN="$D/kimi" "$ROOT/kimi-patch.sh" "$@"; }
+guard() { KIMICODEMODS_DATA="$D" KIMI_BIN="$D/kimi" bash "$HERE/kimi-guard.sh" "$@"; }
+patch() { KIMICODEMODS_DATA="$D" KIMI_BIN="$D/kimi" "$ROOT/kimi-patch.sh" "$@"; }
 has()   { LC_ALL=C grep -a -q -F -- "$1" "$D/kimi"; }
 
 MARK_NAMES='"CLAUDE.md", "claude.md", "GEMINI.md"'

@@ -56,7 +56,7 @@ in `tui.toml`, einer der Schlüssel, die dort ohne erkennbaren Zweck standen.
 **Nicht verifiziert** — der Zusammenhang ist plausibel, aber nicht am Code
 belegt.
 
-## Was daraus für tweakkimi folgt
+## Was daraus für kimi-code-mods folgt
 
 `/dance` ist ein Fund ohne Nutzwert, aber ein Beleg dafür, dass die Tipp-Liste
 Dinge enthält, die sonst nirgends stehen.

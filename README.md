@@ -1,4 +1,4 @@
-# tweakkimi
+# kimi-code-mods
 
 Local patches for the Kimi Code binary — the same idea as tweakcc, adapted to a
 different container.
@@ -123,7 +123,7 @@ no message at all.
 ## The menu
 
 ```
-./tweakkimi.sh                     everything, under one roof
+./kimi-code-mods.sh                     everything, under one roof
 python3 lib/theme-menu.py          just the colours
 python3 lib/config-menu.py         just config.toml
 ```
@@ -212,7 +212,7 @@ Writing to a palette needs a theme of your own that is also the one in use,
 and out of the box neither is true: Kimi ships set to `auto`, which is built
 in. Rather than withhold the rows until that has been sorted out, the screen
 says what will happen and does it when a colour is actually chosen — a theme
-called `tweakkimi` over whichever built-in palette is in play, written to
+called `kimi-code-mods` over whichever built-in palette is in play, written to
 `tui.toml` as the one in use. It overrides nothing until the colour lands in
 it, so creating it changes how nothing looks.
 
@@ -484,8 +484,8 @@ it again; `./test.sh --full` calls it.
 Install the watcher once:
 
 ```
-lib/kimi-guard.sh plist > ~/Library/LaunchAgents/com.tweakkimi.guard.plist
-launchctl load ~/Library/LaunchAgents/com.tweakkimi.guard.plist
+lib/kimi-guard.sh plist > ~/Library/LaunchAgents/com.kimi-code-mods.guard.plist
+launchctl load ~/Library/LaunchAgents/com.kimi-code-mods.guard.plist
 ```
 
 It fires exactly when Kimi rewrites the binary — the one moment you are not
@@ -557,7 +557,7 @@ while building this. Among them —
 - **A drifted override being forced** over prompt text upstream has since
   rewritten.
 
-The suite runs against a sandbox rather than your real state: `TWEAKKIMI_DATA`
+The suite runs against a sandbox rather than your real state: `KIMICODEMODS_DATA`
 redirects baselines, patches and overrides to a temporary directory, and a stub
 stands in for the binary wherever a real Mach-O is not required. Your
 `baseline/`, `patches/` and `system-prompts/` are never touched.

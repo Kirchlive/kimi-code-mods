@@ -82,7 +82,7 @@ if (MODE === 'off') {
   throw new Error('already patched');
 }
 
-const MARK = '__tweakkimiEffort';
+const MARK = '__kimi-code-modsEffort';
 
 if (js.includes(MARK)) {
   throw new Error('already patched');

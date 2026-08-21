@@ -14,7 +14,7 @@ and Escape leaves the screen. Every arrow press closed the menu.
 The only way to catch that is a real descriptor with a real terminal on the
 other end, so this forks a pty, runs a small menu inside it, and types.
 
-It runs against `menu.py` rather than the real one on purpose: the tweakkimi
+It runs against `menu.py` rather than the real one on purpose: the kimi-code-mods
 menu shells out to `kimi-patch.sh --status`, which hashes 180 MB before it
 draws anything. What is under test is the keyboard reaching the loop, and that
 is the same code either way.

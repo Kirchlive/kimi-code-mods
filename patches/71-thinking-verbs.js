@@ -71,7 +71,7 @@ if (MODE === 'off') {
   throw new Error('already patched');
 }
 
-if (js.includes('kimiModsActivityVerb')) {
+if (js.includes('kimiCodeModsActivityVerb')) {
   throw new Error('already patched');
 }
 
@@ -114,12 +114,12 @@ const VERBS = chosen.map(w => FORMAT.split('{}').join(w));
 const HELPER =
   '//#endregion\n'
   + '//#region patches/71-thinking-verbs.js\n'
-  + 'const KIMI_MODS_ACTIVITY_VERBS = [\n'
+  + 'const KIMICODEMODS_ACTIVITY_VERBS = [\n'
   + VERBS.map(v => '\t' + JSON.stringify(v)).join(',\n') + '\n'
   + '];\n'
-  + 'function kimiModsActivityVerb() {\n'
-  + '\treturn KIMI_MODS_ACTIVITY_VERBS[Math.floor(Date.now() / 3500) '
-  + '% KIMI_MODS_ACTIVITY_VERBS.length];\n'
+  + 'function kimiCodeModsActivityVerb() {\n'
+  + '\treturn KIMICODEMODS_ACTIVITY_VERBS[Math.floor(Date.now() / 3500) '
+  + '% KIMICODEMODS_ACTIVITY_VERBS.length];\n'
   + '}\n'
   + '//#endregion\n'
   + '//#region src/tui/components/messages/thinking.ts';
@@ -129,7 +129,7 @@ let out = js.replace(SPLICE_AT, () => HELPER);
 // ------------------------------------------------------ 2. the thinking line
 
 const THINKS = 'currentTheme.fg("textDim", "thinking...")';
-const THINKS_NOW = 'currentTheme.fg("textDim", kimiModsActivityVerb())';
+const THINKS_NOW = 'currentTheme.fg("textDim", kimiCodeModsActivityVerb())';
 
 const thinkHits = out.split(THINKS).length - 1;
 if (thinkHits === 0) {
@@ -160,7 +160,7 @@ if (composingHits !== 1) {
 
 const LABEL = 'const baseText = this.label ? `${coloredFrame} ${this.label}` : coloredFrame;';
 const LABEL_NOW =
-  'const activeLabel = this.label === "working..." ? kimiModsActivityVerb() : this.label;\n'
+  'const activeLabel = this.label === "working..." ? kimiCodeModsActivityVerb() : this.label;\n'
   + '\t\tconst baseText = activeLabel ? `${coloredFrame} ${activeLabel}` : coloredFrame;';
 
 const labelHits = out.split(LABEL).length - 1;

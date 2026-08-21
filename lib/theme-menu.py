@@ -553,7 +553,7 @@ def screen_themes(st: ThemeState) -> m.Screen:
 # The theme created on demand when a colour is changed from a screen that is
 # not the theme editor. One name, so a second colour changed a week later
 # lands in the same file rather than in a pile of them.
-OURS = 'tweakkimi'
+OURS = 'kimi-code-mods'
 
 
 def make_theme_to_edit(directory: Path | None = None) -> tuple[str, str]:
@@ -592,7 +592,7 @@ def editable_theme(directory: Path | None = None) -> tuple[str, str]:
 
     Kimi's own three cannot be edited — they are compiled in, and a file
     called `dark.json` is filtered out of its picker anyway. So a colour
-    changed from anywhere else in tweakkimi needs a theme of your own that is
+    changed from anywhere else in kimi-code-mods needs a theme of your own that is
     also the one in use, and when there is not one the honest answer is to say
     so and offer to make it.
     """

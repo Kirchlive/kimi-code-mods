@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Functional tests for tweakkimi.
+# Functional tests for kimi-code-mods.
 #
 #   ./test.sh          fast checks only — a few seconds, no 180 MB copies
 #   ./test.sh --full   also exercises the real binary: Mach-O resize, signing,
@@ -51,7 +51,7 @@ make_stub() {
 
 sandbox_run() {  # sandbox_run <datadir> <binary> [args…]
   local data="$1" bin="$2"; shift 2
-  TWEAKKIMI_DATA="$data" KIMI_BIN="$bin" "$HERE/kimi-patch.sh" "$@" 2>&1
+  KIMICODEMODS_DATA="$data" KIMI_BIN="$bin" "$HERE/kimi-patch.sh" "$@" 2>&1
 }
 
 echo 'unit checks:'
@@ -177,7 +177,7 @@ if [ "${1:-}" = --full ]; then
 
     # The behavioural half of the SIGPIPE check: the verdict must not vary.
     seen="$(for _ in $(seq 12); do
-              TWEAKKIMI_DATA="$HERE" "$HERE/kimi-patch.sh" --status | awk '/^signature/{print $3}'
+              KIMICODEMODS_DATA="$HERE" "$HERE/kimi-patch.sh" --status | awk '/^signature/{print $3}'
             done | sort -u | wc -l | tr -d ' ')"
     [ "$seen" = 1 ]
     check $? 'signature verdict is stable across 12 runs' "got $seen distinct answers"

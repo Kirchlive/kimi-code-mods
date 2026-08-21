@@ -1,7 +1,7 @@
 # Maus im Terminal — Grundlagen und Umsetzung
 
 Referenz für alles, was mit Mausereignissen in einer Terminal-Anwendung zu tun
-hat. Entstanden aus der Arbeit an Kimi und am tweakkimi-Menü.
+hat. Entstanden aus der Arbeit an Kimi und am kimi-code-mods-Menü.
 
 Der Sonderfall „Klick setzt den Textcursor in Kimis Eingabefeld" hat eine
 eigene Datei: **`CURSOR-CLICK.md`**. Hier steht das Fundament darunter.
@@ -191,7 +191,7 @@ Das ist Mausrad-Scrollen, das vom Terminal kommt — passend zum eingebauten Rat
 
 ---
 
-## Im eigenen Code: das tweakkimi-Menü
+## Im eigenen Code: das kimi-code-mods-Menü
 
 Hier ist es ungleich einfacher als in fremdem, minifiziertem Code: Wir zeichnen
 das Menü selbst und kennen jede Bildschirmzeile.

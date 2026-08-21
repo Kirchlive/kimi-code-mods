@@ -461,7 +461,7 @@ def commit(path: Path, new_text: str, dry_run: bool) -> bool:
         return True
 
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    backup = path.with_suffix(f'.toml.tweakkimi-{stamp}.bak')
+    backup = path.with_suffix(f'.toml.kimi-code-mods-{stamp}.bak')
     if path.exists():
         shutil.copy2(path, backup)
     path.write_text(new_text)
@@ -1182,8 +1182,8 @@ def toolsets_path() -> Path:
 
     Deliberately not in `config.toml`. That file is Kimi's, its schema is
     strict, and `kimi doctor` rejects a key it does not know — a preset stored
-    there would fail validation the moment anyone ran it. This is tweakkimi's
-    own file, in tweakkimi's own format, next to the other one.
+    there would fail validation the moment anyone ran it. This is kimi-code-mods's
+    own file, in kimi-code-mods's own format, next to the other one.
     """
     return HERE.parent / 'toolsets.conf'
 
@@ -1207,7 +1207,7 @@ def read_toolsets(path: Path | None = None) -> dict:
 
 def write_toolsets(sets: dict, path: Path | None = None) -> None:
     path = path or toolsets_path()
-    lines = ['# Named tool sets for tweakkimi. Applying one writes its list to',
+    lines = ['# Named tool sets for kimi-code-mods. Applying one writes its list to',
              '# `[tools] disabled` in config.toml; nothing else here is read by Kimi.',
              '# One `name = Tool, Tool` per line.', '']
     for name in sorted(sets):
@@ -1393,14 +1393,14 @@ def screen_thinking(st: Editing) -> m.Screen:
 
 
 def header(st: Editing) -> list[str]:
-    return ['', 'tweakkimi — Kimi configuration', str(st.path)]
+    return ['', 'kimi-code-mods — Kimi configuration', str(st.path)]
 
 
 def screen_main(st: Editing) -> m.Screen:
     """The top level. Its row keys are the values `--item` accepts.
 
     Keeping them as the digits the old menu printed is what makes `--item 5`
-    still open the permission screen: the main menu of tweakkimi passes those
+    still open the permission screen: the main menu of kimi-code-mods passes those
     digits, and nothing else has to know they came from a numbered list.
     """
 
@@ -1729,7 +1729,7 @@ def _selfcheck():
 
         st = editing()
         screens = [
-            ('main', screen_main(st), 'tweakkimi — Kimi configuration'),
+            ('main', screen_main(st), 'kimi-code-mods — Kimi configuration'),
             ('tools', screen_tools(st, CATALOGUE), 'Disable builtin tools'),
             ('skills', screen_bool(st, K_BUILTIN_SKILLS, 'Builtin product skills',
                                    ['what the skills are']), 'Builtin product skills'),
@@ -2019,7 +2019,7 @@ def _selfcheck():
            K_THINK_KEEP not in tomllib.loads(st.doc.text())[S_THINKING])
 
         # -- tool sets -------------------------------------------------------
-        # The presets are tweakkimi's own file; the only thing that reaches
+        # The presets are kimi-code-mods's own file; the only thing that reaches
         # config.toml is the list a set writes into `[tools] disabled`.
         sets_path = Path(td) / 'toolsets.conf'
         st = editing('[tools]\ndisabled = ["CronCreate", "CronList"]\n')

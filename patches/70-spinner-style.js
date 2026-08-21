@@ -102,7 +102,7 @@ const PRESETS = {
 // choice is made by looking rather than by reading a word. Kept as one table
 // here so the two cannot drift: a preset the menu offers and the patch does
 // not know would be a row that fails when it is applied.
-function kimiModsSpinnerFrames(setting) {
+function kimiCodeModsSpinnerFrames(setting) {
   const raw = String(setting);
   const parts = raw.trim().split(/\s+/).filter(Boolean);
   return parts.length > 1 ? parts : Array.from(raw.trim());
@@ -119,7 +119,7 @@ if (STYLE === 'custom') {
     throw new Error('spinner_style is custom but spinner_frames is empty - '
       + 'set the frames, or pick a preset');
   }
-  custom = kimiModsSpinnerFrames(FRAMES_SETTING);
+  custom = kimiCodeModsSpinnerFrames(FRAMES_SETTING);
   if (custom.length < 2) {
     throw new Error(`spinner_frames needs at least two frames - got ${custom.length}`);
   }

@@ -11,7 +11,7 @@
 //     failure — when there is nothing left to do
 
 const ANCHOR = 'The Starting Point for Next-Gen Agents';
-const REPLACEMENT = 'The Starting Point for Next-Gen Agents [tweakkimi]';
+const REPLACEMENT = 'The Starting Point for Next-Gen Agents [kimi-code-mods]';
 
 if (js.includes(REPLACEMENT)) {
   throw new Error('already patched');

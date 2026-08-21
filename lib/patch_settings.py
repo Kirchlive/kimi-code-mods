@@ -131,7 +131,7 @@ def set_value(key: str, value: str, path: Path | None = None) -> None:
             break
     else:
         if not lines:
-            lines = ['# tweakkimi patch settings — read by patches/*.js at patch time.',
+            lines = ['# kimi-code-mods patch settings — read by patches/*.js at patch time.',
                      '# One key=value per line. See lib/patch_settings.py.']
         lines.append(f'{key}={value}')
 

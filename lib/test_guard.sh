@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Behaviour tests for the auto-repatch guard.
 #
-# Everything runs against a sandbox: TWEAKKIMI_DATA redirects the state
+# Everything runs against a sandbox: KIMICODEMODS_DATA redirects the state
 # directory, KIMI_BIN points at a shell stub that answers --version, and
-# TWEAKKIMI_PATCHER replaces the real patcher with a marker script. No 180 MB
+# KIMICODEMODS_PATCHER replaces the real patcher with a marker script. No 180 MB
 # copies, no signing, no touching the installed Kimi.
 set -uo pipefail
 
@@ -69,8 +69,8 @@ fake_patcher() {  # fake_patcher <dir> <exitcode>
 
 run_guard() {  # run_guard <datadir> <cmd> [extra env assignments handled by caller]
   local d="$1" cmd="$2"; shift 2
-  TWEAKKIMI_DATA="$d" KIMI_BIN="$d/kimi" TWEAKKIMI_GUARD_SETTLE=0 \
-    TWEAKKIMI_GUARD_QUIET=1 TWEAKKIMI_PATCHER="$d/fake-patcher.sh" \
+  KIMICODEMODS_DATA="$d" KIMI_BIN="$d/kimi" KIMICODEMODS_GUARD_SETTLE=0 \
+    KIMICODEMODS_GUARD_QUIET=1 KIMICODEMODS_PATCHER="$d/fake-patcher.sh" \
     "$@" bash "$GUARD" "$cmd" 2>&1
 }
 
@@ -122,7 +122,7 @@ run_guard "$D" repair >/dev/null 2>&1
 check $? 'repair does nothing when the binary is already ours'
 
 D="$(scenario r4 reverted)"; fake_patcher "$D" 0 >/dev/null
-run_guard "$D" repair env TWEAKKIMI_GUARD_ASSUME_RUNNING=1 >/dev/null 2>&1
+run_guard "$D" repair env KIMICODEMODS_GUARD_ASSUME_RUNNING=1 >/dev/null 2>&1
 [ ! -f "$D/PATCHER-RAN" ]
 check $? 'repair will not replace a binary while Kimi is running'
 
@@ -149,7 +149,7 @@ check $? 'rewriting the binary invalidates the cached verdict' "got $(code_of "$
 ! grep -nE 'codesign[^|]*\|[^|]*grep' "$GUARD" >/dev/null
 check $? 'codesign output is not piped into grep (SIGPIPE trap)'
 
-out="$(TWEAKKIMI_DATA="$SANDBOX/c1" KIMI_BIN="$SANDBOX/c1/kimi" bash "$GUARD" plist)"
+out="$(KIMICODEMODS_DATA="$SANDBOX/c1" KIMI_BIN="$SANDBOX/c1/kimi" bash "$GUARD" plist)"
 grep -q '<key>WatchPaths</key>' <<<"$out" && grep -q 'kimi-guard.sh' <<<"$out"
 check $? 'plist names the watched path and the guard'
 

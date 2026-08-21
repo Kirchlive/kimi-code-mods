@@ -463,7 +463,7 @@ def main():
             if not base.exists():
                 print(f'ERROR: --base does not exist: {base}', file=sys.stderr)
                 sys.exit(2)
-            tmp = tempfile.mkdtemp(prefix='tweakkimi-base-')
+            tmp = tempfile.mkdtemp(prefix='kimi-code-mods-base-')
             print(f'recovering the old pristine prompts from {base.name} …')
             base = tree_from_binary(base, Path(tmp))
         conflicts = migrate(old_root, new_root, out_root, base, dry_run)

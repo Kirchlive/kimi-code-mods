@@ -218,10 +218,10 @@ die alte Spalte.
 ## Diagnose
 
 ```
-TWEAKKIMI_CLICK_DEBUG=1 kimi
+KIMICODEMODS_CLICK_DEBUG=1 kimi
 ```
 
-schreibt nach `/tmp/tweakkimi-click.log`, eine JSON-Zeile je Klick. Im
+schreibt nach `/tmp/kimi-code-mods-click.log`, eine JSON-Zeile je Klick. Im
 Erfolgsfall alles von `rect` über `before`, `scrollOffset`, `textX` bis zum
 gesetzten `cursor`. Im Fehlerfall einer von fünf Abbruchgründen:
 

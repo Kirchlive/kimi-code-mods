@@ -108,12 +108,12 @@ if (js.split(classHit[1]).length - 1 !== 1) {
 const METHOD = `
 \t\t__tkClickCursor(event) {
 \t\t\t// Bail reasons are always recorded, successes only with
-\t\t\t// TWEAKKIMI_CLICK_DEBUG=1. Gating the failures behind the variable made
+\t\t\t// KIMICODEMODS_CLICK_DEBUG=1. Gating the failures behind the variable made
 \t\t\t// an empty log ambiguous — it meant either "never reached" or "you
 \t\t\t// forgot the variable", and we lost a round trip to exactly that.
-\t\t\tconst __tkDbg = typeof process !== "undefined" && process.env && process.env.TWEAKKIMI_CLICK_DEBUG === "1";
+\t\t\tconst __tkDbg = typeof process !== "undefined" && process.env && process.env.KIMICODEMODS_CLICK_DEBUG === "1";
 \t\t\tconst __tkLog = (o) => { if (!__tkDbg) return; try {
-\t\t\t\tprocess.getBuiltinModule("fs").appendFileSync("/tmp/tweakkimi-click.log", JSON.stringify(o) + "\\n");
+\t\t\t\tprocess.getBuiltinModule("fs").appendFileSync("/tmp/kimi-code-mods-click.log", JSON.stringify(o) + "\\n");
 \t\t\t} catch {} };
 \t\t\ttry {
 \t\t\t\tif (!this.currentLayout || (typeof this.hasOverlay === "function" && this.hasOverlay())) {
@@ -241,8 +241,8 @@ if (out.split(hookText).length - 1 !== 1) {
 // branch never reached" and "one of the flags was set". Logging the flags here
 // is what finally told the two apart.
 const CALL =
-  '\n\t\t\t\tif (typeof process !== "undefined" && process.env && process.env.TWEAKKIMI_CLICK_DEBUG === "1")' +
-  ' try{process.getBuiltinModule("fs").appendFileSync("/tmp/tweakkimi-click.log",' +
+  '\n\t\t\t\tif (typeof process !== "undefined" && process.env && process.env.KIMICODEMODS_CLICK_DEBUG === "1")' +
+  ' try{process.getBuiltinModule("fs").appendFileSync("/tmp/kimi-code-mods-click.log",' +
   'JSON.stringify({at:"release",dragged:!!this.selectionDragged,url:!!clickedUrl,' +
   'x:event.x,y:event.y,anchor:this.selectionAnchor?{row:this.selectionAnchor.row,col:this.selectionAnchor.col}:null})' +
   '+"\\n")}catch{}' +

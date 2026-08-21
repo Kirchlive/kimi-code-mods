@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tweakkimi — apply local patches to the Kimi Code binary.
+# kimi-code-mods — apply local patches to the Kimi Code binary.
 #
 # Kimi ships as a Node SEA: the whole bundle is plain UTF-8 JavaScript inside a
 # NODE_SEA segment. Patching means extract → transform → repack → re-sign.
@@ -20,7 +20,7 @@ BIN="${KIMI_BIN:-$HOME/.kimi-code/bin/kimi}"
 # Code lives at $HERE; state lives at $DATA. They are the same directory in
 # normal use — splitting them lets the test suite run against a sandbox
 # instead of your real baselines and overrides.
-DATA="${TWEAKKIMI_DATA:-$HERE}"
+DATA="${KIMICODEMODS_DATA:-$HERE}"
 BASELINE_DIR="$DATA/baseline"
 PATCH_DIR="$DATA/patches"
 PROMPT_DIR="$DATA/system-prompts"
@@ -79,7 +79,7 @@ sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 # neighbouring file and renaming it sidesteps the cache and is atomic besides,
 # so an interrupted install can never leave a half-written binary in place.
 install_binary() {  # install_binary <src> <dest>
-  local tmp="$2.tweakkimi.$$"
+  local tmp="$2.kimi-code-mods.$$"
   cp "$1" "$tmp"
   chmod 755 "$tmp"
   mv -f "$tmp" "$2"
@@ -147,7 +147,7 @@ case "${1:-}" in
     if [ -f "$BASELINE" ] && [ "$CURRENT_SHA" = "$(sha "$BASELINE")" ]; then
       st='pristine (baseline, unpatched)'
     elif [ "$CURRENT_SHA" = "$(state_get "$VERSION" patched_sha256)" ]; then
-      st='patched by tweakkimi'
+      st='patched by kimi-code-mods'
     elif [ ! -f "$BASELINE" ]; then
       st='no baseline for this version yet'
     else
@@ -190,7 +190,7 @@ print(f"prompts   : {total} extracted, {edited} edited (applied on the next run)
     python3 "$HERE/lib/prompt-cost.py" "$PROMPT_DIR" "${@:2}"
     exit $? ;;
   --menu)
-    exec "$HERE/tweakkimi.sh" "${@:2}" ;;
+    exec "$HERE/kimi-code-mods.sh" "${@:2}" ;;
   --config-menu)
     python3 "$HERE/lib/config-menu.py" "${@:2}"
     exit $? ;;

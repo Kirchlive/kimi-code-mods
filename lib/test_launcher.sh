@@ -49,16 +49,21 @@ STUB
 chmod +x "$SB/stub"
 
 run() {  # run <profile> [args…]
-  TWEAKKIMI_PROFILE="$1" TWEAKKIMI_REAL_BIN="$SB/stub" \
-    TWEAKKIMI_LAUNCHED= "$LAUNCHER" "${@:2}" 2>&1
+  KIMICODEMODS_PROFILE="$1" KIMICODEMODS_REAL_BIN="$SB/stub" \
+    KIMICODEMODS_LAUNCHED= "$LAUNCHER" "${@:2}" 2>&1
 }
 
 echo 'launcher:'
 
 : > "$SB/empty.conf"
 out="$(run "$SB/empty.conf")"
-[ "$(grep -c '^ENV:KIMI' <<<"$out")" -eq 0 ]
-check $? 'an empty profile exports nothing' "$(grep '^ENV:' <<<"$out" | head -2 | tr '\n' ' ')"
+# The launcher's own KIMICODEMODS_* markers travel with every run and are
+# not exports from the profile, so they are excluded rather than counted.
+# Before the rename they fell outside a plain `^ENV:KIMI` match by accident;
+# now they have to be named.
+[ "$(grep '^ENV:KIMI' <<<"$out" | grep -vc '^ENV:KIMICODEMODS_')" -eq 0 ]
+check $? 'an empty profile exports nothing' \
+  "$(grep '^ENV:' <<<"$out" | grep -v '^ENV:KIMICODEMODS_' | head -2 | tr '\n' ' ')"
 
 cat > "$SB/full.conf" <<'EOF'
 # a comment
@@ -102,21 +107,21 @@ echo
 echo 'self-invocation:'
 
 # Pointing the launcher at itself must fail fast, not fork-bomb.
-out="$(TWEAKKIMI_PROFILE="$SB/empty.conf" TWEAKKIMI_REAL_BIN="$LAUNCHER" \
-       TWEAKKIMI_LAUNCHED= with_timeout 10 "$LAUNCHER")"; rc=$?
+out="$(KIMICODEMODS_PROFILE="$SB/empty.conf" KIMICODEMODS_REAL_BIN="$LAUNCHER" \
+       KIMICODEMODS_LAUNCHED= with_timeout 10 "$LAUNCHER")"; rc=$?
 [ $rc -ne 0 ] && [ $rc -ne 124 ] && grep -q 'loop forever' <<<"$out"
 check $? 'a target resolving to the launcher is refused' "rc=$rc out=${out:0:60}"
 
 # The realistic version: the wrapper sits earlier in PATH than the real binary.
 mkdir -p "$SB/pathdir"
 ln -sf "$LAUNCHER" "$SB/pathdir/kimi"
-out="$(cd "$SB" && PATH="$SB/pathdir:$PATH" TWEAKKIMI_PROFILE="$SB/empty.conf" \
-       TWEAKKIMI_REAL_BIN="$SB/stub" TWEAKKIMI_LAUNCHED= with_timeout 10 kimi)"; rc=$?
+out="$(cd "$SB" && PATH="$SB/pathdir:$PATH" KIMICODEMODS_PROFILE="$SB/empty.conf" \
+       KIMICODEMODS_REAL_BIN="$SB/stub" KIMICODEMODS_LAUNCHED= with_timeout 10 kimi)"; rc=$?
 [ $rc -eq 0 ] && grep -q '^ARGS:' <<<"$out"
 check $? 'shadowing the real binary in PATH still resolves correctly' "rc=$rc"
 
 # A symlinked launcher must still find the profile next to the real script.
-out="$(TWEAKKIMI_REAL_BIN="$SB/stub" TWEAKKIMI_LAUNCHED= with_timeout 10 "$SB/pathdir/kimi")"
+out="$(KIMICODEMODS_REAL_BIN="$SB/stub" KIMICODEMODS_LAUNCHED= with_timeout 10 "$SB/pathdir/kimi")"
 [ $? -eq 0 ]
 check $? 'invoking through a symlink works'
 
@@ -124,30 +129,30 @@ echo
 echo 'env command:'
 
 cp "$SB/empty.conf" "$SB/edit.conf"
-TWEAKKIMI_PROFILE="$SB/edit.conf" "$ENVCMD" set KIMI_CODE_TUI_MAX_TURNS 6 >/dev/null 2>&1
+KIMICODEMODS_PROFILE="$SB/edit.conf" "$ENVCMD" set KIMI_CODE_TUI_MAX_TURNS 6 >/dev/null 2>&1
 grep -qx 'KIMI_CODE_TUI_MAX_TURNS=6' "$SB/edit.conf"
 check $? 'set writes the value'
 
-TWEAKKIMI_PROFILE="$SB/edit.conf" "$ENVCMD" set KIMI_CODE_TUI_MAX_TURNS 9 >/dev/null 2>&1
+KIMICODEMODS_PROFILE="$SB/edit.conf" "$ENVCMD" set KIMI_CODE_TUI_MAX_TURNS 9 >/dev/null 2>&1
 [ "$(grep -c '^KIMI_CODE_TUI_MAX_TURNS=' "$SB/edit.conf")" -eq 1 ] \
   && grep -qx 'KIMI_CODE_TUI_MAX_TURNS=9' "$SB/edit.conf"
 check $? 'setting twice rewrites rather than duplicates'
 
-TWEAKKIMI_PROFILE="$SB/edit.conf" "$ENVCMD" unset KIMI_CODE_TUI_MAX_TURNS >/dev/null 2>&1
+KIMICODEMODS_PROFILE="$SB/edit.conf" "$ENVCMD" unset KIMI_CODE_TUI_MAX_TURNS >/dev/null 2>&1
 ! grep -qE '^KIMI_CODE_TUI_MAX_TURNS=' "$SB/edit.conf"
 check $? 'unset comments the line out'
 
-TWEAKKIMI_PROFILE="$SB/edit.conf" "$ENVCMD" set KIMI_NOT_REAL 1 >/dev/null 2>&1
+KIMICODEMODS_PROFILE="$SB/edit.conf" "$ENVCMD" set KIMI_NOT_REAL 1 >/dev/null 2>&1
 [ $? -ne 0 ]
 check $? 'set refuses a name Kimi does not read'
 
 # A commented default should be uncommented in place, not appended.
 printf '# KIMI_CODE_TUI_HYSTERESIS=5\n' > "$SB/tidy.conf"
-TWEAKKIMI_PROFILE="$SB/tidy.conf" "$ENVCMD" set KIMI_CODE_TUI_HYSTERESIS 1 >/dev/null 2>&1
+KIMICODEMODS_PROFILE="$SB/tidy.conf" "$ENVCMD" set KIMI_CODE_TUI_HYSTERESIS 1 >/dev/null 2>&1
 [ "$(wc -l < "$SB/tidy.conf" | tr -d ' ')" -eq 1 ] && grep -qx 'KIMI_CODE_TUI_HYSTERESIS=1' "$SB/tidy.conf"
 check $? 'a commented default is replaced in place'
 
-out="$(TWEAKKIMI_PROFILE="$SB/tidy.conf" "$ENVCMD" show 2>&1)"
+out="$(KIMICODEMODS_PROFILE="$SB/tidy.conf" "$ENVCMD" show 2>&1)"
 grep -q 'default 5' <<<"$out"
 check $? 'show marks how a value differs from the default'
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The tweakkimi menu — everything adjustable, in one place.
+"""The kimi-code-mods menu — everything adjustable, in one place.
 
 tweakcc keeps its own `config.json` and applies it to the binary on demand, so
 its banner has one thing to say: configured, not yet applied. Here the picture
@@ -224,7 +224,7 @@ def binary_path(state_raw: str) -> Path | None:
 
 def env_value(root: Path, name: str) -> str | None:
     """One variable's value in the launcher profile, or None if unset."""
-    profile = Path(os.environ.get('TWEAKKIMI_PROFILE', root / 'env-profile.conf'))
+    profile = Path(os.environ.get('KIMICODEMODS_PROFILE', root / 'env-profile.conf'))
     try:
         text = profile.read_text()
     except OSError:
@@ -239,7 +239,7 @@ def env_value(root: Path, name: str) -> str | None:
 
 
 def env_count(root: Path) -> int:
-    profile = Path(os.environ.get('TWEAKKIMI_PROFILE', root / 'env-profile.conf'))
+    profile = Path(os.environ.get('KIMICODEMODS_PROFILE', root / 'env-profile.conf'))
     try:
         text = profile.read_text()
     except OSError:
@@ -419,7 +419,7 @@ def header(st: State) -> list[str]:
     `system-prompts/` all live in it. `config.toml` is Kimi's own and stays
     where Kimi reads it, which is why it is named separately.
     """
-    return ['', ' tweakkimi', '',
+    return ['', ' kimi-code-mods', '',
             f'🌕 Customize your Kimi Code installation. Settings will be saved to '
             f'{tilde(st.root)} and {tilde(st.config_path)}. 🌕', '',
             f' Kimi {st.version} — {st.binary_state}, {st.signature} signature'] + banner(st)
@@ -524,7 +524,7 @@ def write_config_value(st: State, section: str, key: str, value) -> str:
     try:
         if path.exists() and path not in _backed_up:
             stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            shutil.copy2(path, path.with_suffix(f'.toml.tweakkimi-{stamp}.bak'))
+            shutil.copy2(path, path.with_suffix(f'.toml.kimi-code-mods-{stamp}.bak'))
             _backed_up.add(path)
         path.write_text(text)
     except OSError as e:
@@ -544,7 +544,7 @@ def config_item(st: State, item: str) -> None:
     In-process there is no second menu to fall into: the screen returns here,
     to the row you opened it from. The cost is that the editor's deferred write
     has to be resolved here instead, and it is resolved the way the rest of
-    tweakkimi behaves — a change to a setting is written when you leave the
+    kimi-code-mods behaves — a change to a setting is written when you leave the
     screen that made it. `config-menu.py` run on its own keeps its Write row;
     that is its interface, and this is ours.
     """
@@ -1612,10 +1612,10 @@ def _selfcheck() -> int:
 
     patched = ('binary    : {bin}\n'
                'version   : 0.36.0\n'
-               'state     : patched by tweakkimi\n'
+               'state     : patched by kimi-code-mods\n'
                'signature : ad-hoc\n'
                'prompts   : 69 extracted, 0 edited (applied on the next run)\n')
-    pristine = patched.replace('patched by tweakkimi', 'pristine (baseline, unpatched)')
+    pristine = patched.replace('patched by kimi-code-mods', 'pristine (baseline, unpatched)')
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
