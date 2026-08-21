@@ -176,7 +176,14 @@ class Screen:
     def __init__(self, build, header=None, activate=None, cycle=None,
                  reload=None, delete=None, aside=None, edit=None,
                  edit_start=None, inline_help=False, help_line=HELP_SUB,
-                 title=''):
+                 title='', frames=None, frame_interval=SPIN_INTERVAL):
+        # What the animated cell cycles through, as a callable of the state —
+        # the moon by default, but a screen previewing a spinner shows that
+        # spinner's own frames, and one previewing the rotating verbs shows
+        # the words. `frame_interval` is how long each is held: fast enough to
+        # look like motion for a spinner, slow enough to read for a word.
+        self._frames = frames
+        self.frame_interval = frame_interval
         self.build = build
         self._header = header
         self._activate = activate
@@ -194,6 +201,19 @@ class Screen:
         self.inline_help = inline_help
         self.help_line = help_line
         self.title = title
+
+    def frames(self, st) -> tuple[str, ...]:
+        """The animated cell's sequence, every entry padded to one width.
+
+        Equal width is what lets `loop` rewrite the cell in place: the frames
+        of a spinner are one or two columns and the rotating verbs are whole
+        words, and a cell that changed width would push the rest of its line
+        around on every tick — the box drawn around a preview would breathe.
+        """
+        raw = tuple(self._frames(st)) if self._frames is not None else SPIN_FRAMES
+        raw = raw or ('—',)
+        wide = max(visible(f) for f in raw)
+        return tuple(f + ' ' * (wide - visible(f)) for f in raw)
 
     def header(self, st) -> list[str]:
         # The title is indented by one to sit over the row labels, which start
@@ -269,6 +289,22 @@ class Screen:
 # --------------------------------------------------------------------------
 
 
+def _put_frame(lines: list[str], frames: tuple[str, ...],
+               frame: int) -> tuple[int, int] | None:
+    """Fill in the animated cell, and say where it landed.
+
+    Done before anything measures these lines: the placeholder is six
+    characters wide and a frame is whatever the screen cycles through, so
+    substituting afterwards would throw off every width computed from them.
+    """
+    for i, line in enumerate(lines):
+        if SPIN_SLOT in line:
+            col = visible(line.split(SPIN_SLOT)[0])
+            lines[i] = line.replace(SPIN_SLOT, frames[frame % len(frames)], 1)
+            return i, col
+    return None
+
+
 def render(screen: Screen, st, items: list[Item], cursor: int,
            row_map: dict | None = None, color: bool = False,
            width: int | None = None, editing: tuple | None = None,
@@ -286,12 +322,10 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
     # column recorded here has to be the one the frame actually occupies.
     global spin_at
     spin_at = None
-    for i, line in enumerate(lines):
-        if SPIN_SLOT in line:
-            spin_at = (i, visible(line.split(SPIN_SLOT)[0]))
-            lines[i] = line.replace(SPIN_SLOT,
-                                    SPIN_FRAMES[frame % len(SPIN_FRAMES)], 1)
-            break
+    frames = screen.frames(st)
+    head_at = _put_frame(lines, frames, frame)
+    if head_at is not None:
+        spin_at = (head_at[0], head_at[1], frames)
     lines.append('')
 
     sel_row = items[cursor] if 0 <= cursor < len(items) else None
@@ -332,7 +366,22 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
     # a sentence is what decides how wide the left column is if it is allowed
     # to. Left in, one long explanation would push a preview that fits
     # comfortably onto the line below the whole menu.
-    lines = beside(lines, screen.aside(st, sel_row), width)
+    # A preview may animate too, and its line has to be found before `beside`
+    # measures it — but the column it ends up in is only known afterwards,
+    # once the left column's width is settled. The shift is whatever `beside`
+    # put in front of it, which is the width the line gained.
+    aside_lines = list(screen.aside(st, sel_row))
+    aside_at = _put_frame(aside_lines, frames, frame)
+    before = len(lines)
+    lines = beside(lines, aside_lines, width)
+    if aside_at is not None and spin_at is None:
+        row, col = aside_at
+        if len(lines) == before + 1 + len(aside_lines):
+            # Too narrow to sit beside: the preview went below, unshifted.
+            spin_at = (before + 1 + row, col, frames)
+        elif row < len(lines):
+            spin_at = (row, col + visible(lines[row]) - visible(aside_lines[row]),
+                       frames)
 
     lines.append('')
     sel = items[cursor] if 0 <= cursor < len(items) else None
@@ -450,11 +499,10 @@ def spin_once(frame: int) -> None:
     """
     if spin_at is None or not sys.stdout.isatty():
         return
-    row, col = spin_at
+    row, col, frames = spin_at
     if row >= shutil.get_terminal_size().lines:
         return
-    sys.stdout.write(f'\x1b[{row + 1};{col + 1}H'
-                     + SPIN_FRAMES[frame % len(SPIN_FRAMES)])
+    sys.stdout.write(f'\x1b[{row + 1};{col + 1}H' + frames[frame % len(frames)])
     sys.stdout.flush()
 
 
@@ -991,7 +1039,8 @@ def loop(screen: Screen, st) -> int:
             # costs no latency — `read_key` is called the moment there is
             # something to read.
             with raw_mode(mouse=True):
-                while spin_at is not None and not key_ready(timeout=SPIN_INTERVAL):
+                while (spin_at is not None
+                       and not key_ready(timeout=screen.frame_interval)):
                     frame += 1
                     spin_once(frame)
                 key = read_key()

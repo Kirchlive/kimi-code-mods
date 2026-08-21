@@ -1135,8 +1135,12 @@ def screen_thinking_style(st: State) -> m.Screen:
         if item.key in ps.CHOICES:
             ps.cycle(item.key, forward, s.settings_path)
 
+    # The preview turns at the speed the setting asks for, so `20 ms` and
+    # `600 ms` are told apart by watching rather than by reading the number.
     return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
                     reload=reload_state, aside=spinner_preview,
+                    frames=lambda x: spinner_frames(x) or ['—'],
+                    frame_interval=spinner_interval(st),
                     help_line=m.HELP_DEL, title='Thinking style')
 
 
@@ -1149,16 +1153,25 @@ def verb_words(st: State) -> list[str]:
 
 
 def verb_preview(st: State, sel=None) -> list[str]:
-    fmt = st.settings.get('thinking_verbs_format', '{}')
+    """The rotating word on one line, rotating.
+
+    Six words listed under each other are a list, which the row above already
+    is. What the setting actually does is swap one word for the next, so the
+    preview swaps one word for the next — held long enough to read, unlike
+    the spinner beside it.
+    """
     words = verb_words(st)
     frame = (spinner_frames(st) or ['✻'])[0]
-    out = ['', ' Preview', '', '  ┌' + '─' * 34 + '┐']
-    for w in (words[:6] or ['—']):
-        line = f'{frame} {fmt.replace("{}", w)} (esc to interrupt)'
-        out.append('  │ ' + line + ' ' * max(0, 33 - m.visible(line)) + '│')
-    out.append('  └' + '─' * 34 + '┘')
-    out += ['', f'  {len(words)} word(s), one every 3.5 s']
-    return out
+    line = f'{frame} {m.SPIN_SLOT} (esc to interrupt)'
+    widest = max(verb_phrases(st) or ['—'], key=m.visible)
+    return _preview_box(line, m.visible(line.replace(m.SPIN_SLOT, widest))) + [
+        '', f'  {len(words)} word(s), one every 3.5 s']
+
+
+def verb_phrases(st: State) -> list[str]:
+    """Each word already put through the format — what the preview cycles."""
+    fmt = st.settings.get('thinking_verbs_format', '{}')
+    return [fmt.replace('{}', w) for w in verb_words(st)]
 
 
 def screen_thinking_verbs(st: State) -> m.Screen:
@@ -1243,8 +1256,13 @@ def screen_thinking_verbs(st: State) -> m.Screen:
         if item.key in ps.CHOICES:
             ps.cycle(item.key, forward, s.settings_path)
 
+    # Slower than a spinner on purpose: this one is read, not watched. Kimi
+    # holds each word for 3.5 s, which is longer than anyone will stand in
+    # front of a preview, so it is shortened rather than copied.
     return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
                     reload=reload_state, aside=verb_preview,
+                    frames=lambda x: verb_phrases(x) or ['—'],
+                    frame_interval=0.9,
                     help_line=m.HELP_DEL, title='Thinking verbs')
 
 
@@ -2185,13 +2203,20 @@ def _selfcheck() -> int:
         # the value it is supposed to be showing, not merely for existing.
         settings.write_text('')
         st = state()
+        # The preview no longer holds the frames themselves — it holds one
+        # slot, and the screen hands `menu.render` the sequence to cycle
+        # through it. Both halves are checked: the sequence follows the
+        # setting, and the preview is one line with one slot in it.
         check('the spinner preview falls back to Kimi\'s own frames',
-              '⠋' in '\n'.join(spinner_preview(st)), spinner_preview(st)[:6])
+              '⠋' in spinner_frames(st), spinner_frames(st)[:4])
+        check('and shows them on a single animated line',
+              sum(m.SPIN_SLOT in ln for ln in spinner_preview(st)) == 1,
+              spinner_preview(st))
 
         ps.set_value('spinner_style', 'star', settings)
         st = state()
         check('choosing a preset shows that preset\'s frames',
-              '✻' in '\n'.join(spinner_preview(st)), spinner_preview(st))
+              '✻' in spinner_frames(st), spinner_frames(st))
         check('and the frames come from the patch, not a copy here',
               spinner_frames(st) == patch_table(st.patch_file('spinner'),
                                                 'PRESETS')['star'],
@@ -2222,7 +2247,10 @@ def _selfcheck() -> int:
               verb_words(state()) == ['one', 'two', 'three'], verb_words(state()))
         ps.set_value('thinking_verbs_format', '{}…', settings)
         check('the format reaches the preview',
-              'one…' in '\n'.join(verb_preview(state())), verb_preview(state()))
+              'one…' in verb_phrases(state()), verb_phrases(state()))
+        check('and the verb preview is one animated line too',
+              sum(m.SPIN_SLOT in ln for ln in verb_preview(state())) == 1,
+              verb_preview(state()))
         ps.set_value('thinking_verbs_list', 'default', settings)
         ps.set_value('thinking_verbs_format', '{}', settings)
 
