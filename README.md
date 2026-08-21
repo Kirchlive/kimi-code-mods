@@ -587,3 +587,10 @@ sequences into the shell on every pointer movement, which the user has no
 obvious way to stop; and anything an entry runs — the TOML editor,
 `kimi-patch.sh`, your `$EDITOR` — gets a clean terminal rather than a stream
 of mouse reports in its stdin. `MOUSE-CLICK.md` has the background.
+
+While tracking is on, a drag belongs to the menu, not to the terminal, so
+selecting text to copy it does nothing. Most terminals hand the selection back
+when a modifier is held — Option on macOS Terminal and iTerm2, Shift on
+GNOME Terminal, Konsole and PuTTY. To keep the pointer out of the menu
+altogether, set `TWEAKKIMI_MOUSE=0` (or `off`); clicks then go to the terminal
+and the menu stays keyboard-driven.

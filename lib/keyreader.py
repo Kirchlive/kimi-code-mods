@@ -138,7 +138,12 @@ def raw_mode(stream=None, mouse: bool = False):
     # Only ask for reports when they can actually be written somewhere the
     # terminal will read them; with stdout redirected the codes would land in
     # the pipe instead.
-    tracking = bool(mouse) and sys.stdout.isatty()
+    # TWEAKKIMI_MOUSE=0 leaves tracking off for the whole session. With
+    # tracking on the terminal hands clicks to the menu, so a drag selects
+    # nothing and text cannot be copied; someone who would rather copy than
+    # click sets this once and keeps the keyboard navigation.
+    tracking = (bool(mouse) and sys.stdout.isatty()
+                and os.environ.get('TWEAKKIMI_MOUSE', '1') not in ('0', 'off'))
     try:
         # TCSANOW, not the TCSAFLUSH that `tty.setcbreak` uses by default.
         # Flushing discards whatever is already in the input queue, and this
