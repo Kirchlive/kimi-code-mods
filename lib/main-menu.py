@@ -1034,9 +1034,25 @@ def spinner_frames(st: State) -> list[str]:
         return parts if len(parts) > 1 else list(raw.strip())
     if style in presets:
         return presets[style]
-    # `default` and `mirror` both keep Kimi's own braille set on screen; the
-    # difference between them is the order, which a still preview cannot show.
     return ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+
+def mirrored(frames: list[str], on: bool) -> list[str]:
+    """The frames as the patch will write them, mirror included.
+
+    A still preview could not show the difference between a run and a swing,
+    so `mirror` used to be a word the preview ignored. A moving one can: the
+    swing *is* the sequence, once the reversed frames are appended.
+
+    Guarded the way the patch guards it — an even-length palindrome is already
+    mirrored — so a set that swings by itself is not doubled.
+    """
+    if not on or not frames:
+        return frames
+    if len(frames) % 2 == 0 and all(f == frames[len(frames) - 1 - i]
+                                    for i, f in enumerate(frames)):
+        return frames
+    return frames + frames[::-1]
 
 
 def _preview_box(line: str, filled: int) -> list[str]:
@@ -1086,9 +1102,14 @@ def spinner_preview(st: State, sel=None) -> list[str]:
     # it in and `menu.loop` cycles it in place. Padded to the width of the
     # widest frame there, so the box does not breathe as it turns.
     line = f'{m.SPIN_SLOT} {verb} (esc to interrupt)'
-    widest = max(spinner_frames(st) or ['—'], key=m.visible)
+    # Counted and measured after mirroring, because that is what will run: a
+    # swing is twice the frames, and saying eight while sixteen go past would
+    # be the preview disagreeing with itself.
+    frames = mirrored(spinner_frames(st),
+                      st.settings.get('spinner_mirror') == 'on')
+    widest = max(frames or ['—'], key=m.visible)
     return _preview_box(line, m.visible(line.replace(m.SPIN_SLOT, widest))) + [
-        '', f'  {len(spinner_frames(st))} frame(s), '
+        '', f'  {len(frames)} frame(s), '
             + ('Kimi\'s own speed' if rate == 'default' else f'{rate} ms each')]
 
 
@@ -1117,9 +1138,11 @@ def working_frames(st: State) -> list[str]:
 def working_preview(st: State, sel=None) -> list[str]:
     """The working spinner on one line, turning the way it will turn."""
     line = f'{m.SPIN_SLOT} Waiting on the model…'
-    widest = max(working_frames(st) or ['—'], key=m.visible)
+    frames = mirrored(working_frames(st),
+                      st.settings.get('working_mirror') == 'on')
+    widest = max(frames or ['—'], key=m.visible)
     return _preview_box(line, m.visible(line.replace(m.SPIN_SLOT, widest))) + [
-        '', f'  {len(working_frames(st))} frame(s), '
+        '', f'  {len(frames)} frame(s), '
             + ('same as thinking'
                if st.settings.get('working_style', 'follow') == 'follow'
                else 'its own set')]
@@ -1211,7 +1234,9 @@ def screen_working_style(st: State) -> m.Screen:
     # interval setting says otherwise.
     return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
                     reload=reload_state, aside=working_preview,
-                    frames=lambda x: working_frames(x) or ['—'],
+                    frames=lambda x: mirrored(working_frames(x),
+                                              x.settings.get('working_mirror') == 'on')
+                    or ['—'],
                     frame_interval=spinner_interval(st),
                     help_line=m.HELP_DEL, title='Working style')
 
@@ -1317,7 +1342,9 @@ def screen_thinking_style(st: State) -> m.Screen:
     # `600 ms` are told apart by watching rather than by reading the number.
     return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
                     reload=reload_state, aside=spinner_preview,
-                    frames=lambda x: spinner_frames(x) or ['—'],
+                    frames=lambda x: mirrored(spinner_frames(x),
+                                              x.settings.get('spinner_mirror') == 'on')
+                    or ['—'],
                     frame_interval=spinner_interval(st),
                     help_line=m.HELP_DEL, title='Thinking style')
 
