@@ -25,6 +25,7 @@ can be exercised without a TTY.
 import colorsys
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -33,7 +34,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from keyreader import Mouse, raw_mode, read_key             # noqa: E402
+from keyreader import Mouse, key_ready, raw_mode, read_key  # noqa: E402
 
 CURSOR = '❯'                    # the tweakcc marker
 RULE_WIDTH = 64
@@ -89,6 +90,29 @@ def paint(text: str, style: str, on: bool) -> str:
 HELP_ROOT = '  ↑↓ move · enter open · ‹› change · q quit'
 HELP_SUB = '  ↑↓ move · enter open · ‹› change · esc back'
 HELP_DEL = '  ↑↓ move · enter open · ‹› change · ⌫ remove · esc back'
+
+# The moon Kimi turns beside its own spinner, at the interval its `MoonLoader`
+# uses. A header line may carry `SPIN_SLOT` once; `render` swaps the current
+# frame in and `loop` rewrites those two columns while it waits for a key.
+#
+# Two columns, not the line and not the screen: a full repaint five times a
+# second would erase the scrollback with it and destroy any selection the user
+# was making, which is the thing this menu was just taught not to do. Writing
+# one cell in place costs about a dozen bytes and leaves the rest untouched.
+#
+# The frames start at the full moon rather than the new one, so the header at
+# rest reads the way it always has.
+SPIN_FRAMES = ('🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘')
+SPIN_START = 4
+SPIN_SLOT = '{spin}'
+SPIN_INTERVAL = 0.12
+
+# Where the last `render` put that cell: (line, column), both zero-based, or
+# None when the screen has no animated cell or the placeholder was not drawn.
+# A module-level answer rather than a fourth return value, because every
+# caller of `render` and `draw` would otherwise have to carry it through to
+# reach the one place that uses it.
+spin_at: tuple[int, int] | None = None
 
 
 class Item:
@@ -247,7 +271,8 @@ class Screen:
 
 def render(screen: Screen, st, items: list[Item], cursor: int,
            row_map: dict | None = None, color: bool = False,
-           width: int | None = None, editing: tuple | None = None) -> list[str]:
+           width: int | None = None, editing: tuple | None = None,
+           frame: int = SPIN_START) -> list[str]:
     """The screen as lines, recording which line each row landed on.
 
     A preview, when the screen has one, is appended to the same lines rather
@@ -255,6 +280,18 @@ def render(screen: Screen, st, items: list[Item], cursor: int,
     so anything that adds lines has to go through here to be counted.
     """
     lines = list(screen.header(st))
+    # The animated cell is filled in before anything measures a line. The
+    # placeholder is six characters wide and the frame is two columns, so
+    # substituting later would throw off every width computed below — and the
+    # column recorded here has to be the one the frame actually occupies.
+    global spin_at
+    spin_at = None
+    for i, line in enumerate(lines):
+        if SPIN_SLOT in line:
+            spin_at = (i, visible(line.split(SPIN_SLOT)[0]))
+            lines[i] = line.replace(SPIN_SLOT,
+                                    SPIN_FRAMES[frame % len(SPIN_FRAMES)], 1)
+            break
     lines.append('')
 
     sel_row = items[cursor] if 0 <= cursor < len(items) else None
@@ -377,7 +414,8 @@ def beside(lines: list[str], aside: list[str], width: int | None = None) -> list
     return out
 
 
-def draw(screen: Screen, st, items: list[Item], cursor: int) -> dict:
+def draw(screen: Screen, st, items: list[Item], cursor: int,
+         frame: int = SPIN_START) -> dict:
     """Paint the screen and return the line-to-row mapping for the mouse.
 
     Clear-and-home puts the first line at screen row 0, which is what makes the
@@ -395,9 +433,29 @@ def draw(screen: Screen, st, items: list[Item], cursor: int) -> dict:
         sys.stdout.write(HIDE_CURSOR)
     row_map: dict[int, int] = {}
     print('\n'.join(render(screen, st, items, cursor, row_map,
-                           color=sys.stdout.isatty(), width=terminal_width())))
+                           color=sys.stdout.isatty(), width=terminal_width(),
+                           frame=frame)))
     sys.stdout.flush()
     return row_map
+
+
+def spin_once(frame: int) -> None:
+    """Rewrite the animated cell in place, leaving the rest of the screen be.
+
+    Addressed absolutely, which only holds while the drawing starts at the top
+    of the window — the same condition `draw`'s click mapping depends on. On a
+    screen too tall to fit, the top has scrolled away and the cell is no longer
+    where it was recorded, so nothing is written rather than a moon landing in
+    the middle of a row.
+    """
+    if spin_at is None or not sys.stdout.isatty():
+        return
+    row, col = spin_at
+    if row >= shutil.get_terminal_size().lines:
+        return
+    sys.stdout.write(f'\x1b[{row + 1};{col + 1}H'
+                     + SPIN_FRAMES[frame % len(SPIN_FRAMES)])
+    sys.stdout.flush()
 
 
 def show_cursor() -> None:
@@ -912,9 +970,12 @@ def loop(screen: Screen, st) -> int:
         print('\n'.join(render(screen, st, items, cursor)))
         return 0
 
+    # Carried across repaints so the moon keeps turning from where it was
+    # rather than snapping back to full on every keystroke.
+    frame = SPIN_START
     try:
         while True:
-            row_map = draw(screen, st, items, cursor)
+            row_map = draw(screen, st, items, cursor, frame)
             # Raw mode and mouse tracking wrap the keystroke only. Everything a
             # row may run — the TOML editor, kimi-patch.sh, an editor — reads
             # lines from this same terminal: cbreak mode would break their
@@ -923,7 +984,16 @@ def loop(screen: Screen, st) -> int:
             # keystrokes costs a few bytes and removes a whole class of
             # interference. The cursor stays hidden here; `Screen.activate`
             # gives it back on the one path that hands the terminal away.
+            #
+            # Waiting for that key is where the moon turns: every time the
+            # wait times out with nothing typed, one cell is rewritten and the
+            # wait starts again. A key ends it immediately, so the animation
+            # costs no latency — `read_key` is called the moment there is
+            # something to read.
             with raw_mode(mouse=True):
+                while spin_at is not None and not key_ready(timeout=SPIN_INTERVAL):
+                    frame += 1
+                    spin_once(frame)
                 key = read_key()
 
             # Enter on a row that is typed into edits it where it stands,

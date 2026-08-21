@@ -420,8 +420,8 @@ def header(st: State) -> list[str]:
     where Kimi reads it, which is why it is named separately.
     """
     return ['', ' kimi-code-mods', '',
-            f'🌕 Customize your Kimi Code installation. Settings will be saved to '
-            f'{tilde(st.root)} and {tilde(st.config_path)}. 🌕', '',
+            f'{m.SPIN_SLOT} Customize your Kimi Code installation. Settings will '
+            f'be saved to {tilde(st.root)} and {tilde(st.config_path)}.', '',
             f' Kimi {st.version} — {st.binary_state}, {st.signature} signature'] + banner(st)
 
 

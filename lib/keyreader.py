@@ -305,6 +305,16 @@ def _parse_sgr(seq: str):
     return Mouse(button, col - 1, row - 1, final == 'M')
 
 
+def key_ready(stream=None, timeout: float = 0.0) -> bool:
+    """Is there a keypress waiting, within `timeout` seconds?
+
+    Lets a caller wait for input *and* get on with something else — the menu
+    turns the moon in its header on the timeouts. `read_key` still does the
+    reading; this only answers whether calling it would block.
+    """
+    return _waiting(_unbuffered(stream), timeout)
+
+
 def read_key(stream=None):
     """One keypress or mouse click.
 
