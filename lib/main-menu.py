@@ -347,7 +347,10 @@ def build_items(st: State) -> list[Item]:
         Item('submenu', 'Thinking verbs', key='verbs',
              help='Rotate the word beside the spinner instead of always saying "working".'),
         Item('submenu', 'Thinking style', key='style',
-             help='The characters the working indicator cycles through, and how fast.'),
+             help='The spinner while Kimi thinks and composes, and how fast it turns.'),
+        Item('submenu', 'Working style', key='working',
+             help='The spinner while Kimi waits on the model or a tool, not '
+                  'while it thinks.'),
         Item('submenu', 'User message display', key='usermsg',
              help='How your own messages are drawn in the transcript.'),
         Item('submenu', 'Misc', key='misc',
@@ -722,6 +725,18 @@ PATCH_HELP = {
     'thinking_verbs_format': (
         'Thinking verb format',
         'Where the word goes; {} is the word.', 'verbs'),
+    'working_style': (
+        'Working spinner',
+        'The spinner while Kimi waits on the model or a tool, not while it '
+        'thinks.', 'spinner'),
+    'working_mirror': (
+        'Reverse-mirror run',
+        'Run the working frames forwards then backwards, so the spinner swings '
+        'instead of jumping back to the first.', 'spinner'),
+    'working_frames': (
+        'Your own working frames',
+        'The frames the working spinner\'s `custom` style uses. Separate with '
+        'spaces.', 'spinner'),
     'spinner_frames': (
         'Your own spinner frames',
         'The frames the `custom` style uses. Separate with spaces.', 'spinner'),
@@ -754,6 +769,8 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
                                  'thinking_verbs_format']),
     'style': ('Thinking style', ['spinner_style', 'spinner_interval_ms',
                                  'spinner_frames', 'spinner_mirror']),
+    'working': ('Working style', ['working_style', 'working_frames',
+                                  'working_mirror']),
     'usermsg': ('User message display', ['user_message_marker',
                                          'user_message_border',
                                          'user_message_style']),
@@ -1022,20 +1039,181 @@ def spinner_frames(st: State) -> list[str]:
     return ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 
+def _preview_box(line: str, filled: int) -> list[str]:
+    """A framed preview line, with the frame sized to what will be drawn in it.
+
+    `filled` is how wide the line becomes once the animated cell is filled —
+    which is not how wide `line` looks now, because the placeholder is six
+    characters and a frame is whatever the screen cycles through. The box
+    grows rather than clipping: the longest of the rotating verbs is wider
+    than the old fixed frame, and a preview that cut its own words off would
+    be worse than a wide one.
+    """
+    inner = max(33, filled)
+    return ['', ' Preview', '', '  ┌' + '─' * (inner + 1) + '┐',
+            '  │ ' + line + ' ' * (inner - filled) + '│',
+            '  └' + '─' * (inner + 1) + '┘']
+
+
+def spinner_interval(st: State) -> float:
+    """How long one frame is held, in seconds, as the patch will hold it.
+
+    `default` is Kimi's own: 120 ms for the moon, 80 ms for everything else,
+    which is what `MoonLoader` uses. Anything else is the millisecond value
+    the setting carries, clamped to the range the patch accepts so a preview
+    cannot spin faster than the thing it is previewing.
+    """
+    raw = st.settings.get('spinner_interval_ms', 'default')
+    if raw in ('', 'default'):
+        return 0.12 if st.settings.get('spinner_style') == 'moon' else 0.08
+    try:
+        return min(2000, max(20, int(raw))) / 1000
+    except (TypeError, ValueError):
+        return 0.08
+
+
 def spinner_preview(st: State, sel=None) -> list[str]:
-    """One frame of the working indicator, as it will be drawn."""
-    frames = spinner_frames(st)
+    """The working indicator on one line, turning the way it will turn.
+
+    A column of six stills was the old answer to "what does `wave` look
+    like", and it answered the wrong question: a spinner is a thing in
+    motion, and six frames stacked up read as six spinners. One line that
+    actually moves is both smaller and closer to what you will see.
+    """
     rate = st.settings.get('spinner_interval_ms', 'default')
     verb = 'working…' if st.settings.get('thinking_verbs') == 'on' else 'working...'
-    out = ['', ' Preview', '', '  ┌' + '─' * 34 + '┐']
-    for f in (frames[:6] or ['—']):
-        line = f'{f} {verb} (esc to interrupt)'
-        out.append('  │ ' + line + ' ' * max(0, 33 - m.visible(line)) + '│')
-    out.append('  └' + '─' * 34 + '┘')
-    out.append('')
-    out.append(f'  {len(frames)} frame(s), '
-               + ('Kimi\'s own speed' if rate == 'default' else f'{rate} ms each'))
-    return out
+    # The frame is a placeholder rather than a character: `menu.render` fills
+    # it in and `menu.loop` cycles it in place. Padded to the width of the
+    # widest frame there, so the box does not breathe as it turns.
+    line = f'{m.SPIN_SLOT} {verb} (esc to interrupt)'
+    widest = max(spinner_frames(st) or ['—'], key=m.visible)
+    return _preview_box(line, m.visible(line.replace(m.SPIN_SLOT, widest))) + [
+        '', f'  {len(spinner_frames(st))} frame(s), '
+            + ('Kimi\'s own speed' if rate == 'default' else f'{rate} ms each')]
+
+
+def working_frames(st: State) -> list[str]:
+    """The frames the working spinner will actually turn.
+
+    `follow` is not a set of its own — it means "whatever the thinking spinner
+    was given", which is what the single setting used to do to both arrays.
+    `default` is the one way to keep Kimi's moon while changing the other.
+    """
+    style = st.settings.get('working_style', 'follow')
+    if style == 'follow':
+        return spinner_frames(st)
+    if style == 'custom':
+        raw = st.settings.get('working_frames', 'default')
+        if raw in ('', 'default'):
+            return []
+        parts = raw.split()
+        return parts if len(parts) > 1 else list(raw.strip())
+    presets = patch_table(st.patch_file('spinner'), 'PRESETS')
+    if style in presets:
+        return presets[style]
+    return ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
+
+
+def working_preview(st: State, sel=None) -> list[str]:
+    """The working spinner on one line, turning the way it will turn."""
+    line = f'{m.SPIN_SLOT} Waiting on the model…'
+    widest = max(working_frames(st) or ['—'], key=m.visible)
+    return _preview_box(line, m.visible(line.replace(m.SPIN_SLOT, widest))) + [
+        '', f'  {len(working_frames(st))} frame(s), '
+            + ('same as thinking'
+               if st.settings.get('working_style', 'follow') == 'follow'
+               else 'its own set')]
+
+
+def screen_working_style(st: State) -> m.Screen:
+    """The other spinner: the one Kimi turns while it waits, not while it thinks.
+
+    Kimi keeps two alphabets. `BRAILLE_SPINNER_FRAMES` runs while it composes
+    and thinks; `MOON_SPINNER_FRAMES` runs while it waits on the model or on a
+    tool — the moon you see when it is working. They were set together here
+    until this screen existed, which made a chosen style follow Kimi around
+    rather than say what it was doing.
+    """
+    presets = patch_table(st.patch_file('spinner'), 'PRESETS')
+    keys = SETTING_GROUPS['working'][1]
+
+    def frames_value(x: State) -> str:
+        raw = x.settings.get('working_frames', 'default')
+        return DEFAULT_MEANS['spinner_frames'] if raw in ('', 'default') else str(raw)
+
+    def build(s: State) -> list[Item]:
+        current = s.settings.get('working_style', 'follow')
+        note = value_note(lambda x: current, at_default(*keys),
+                          (lambda q: lambda x: x.feature_note(q))(s.patch_file('spinner')))
+        rows = [Item('info', 'read while the patches are applied — '
+                             'a change here needs a patch run'),
+                Item('sep')]
+        for name in ps.CHOICES['working_style']:
+            if name == 'follow':
+                shown = 'same as thinking'
+            elif name == 'default':
+                shown = 'Kimi\'s own moon'
+            elif name == 'custom':
+                raw = s.settings.get('working_frames', 'default')
+                shown = '—' if raw in ('', 'default') else ' '.join(working_frames(s)[:10])
+            else:
+                shown = ' '.join(presets.get(name, []))
+            rows.append(Item('action', name,
+                             (lambda tx, on: lambda x: ('● ' if on else '○ ') + tx)(
+                                 shown, name == current),
+                             note if name == current else (lambda x: ''),
+                             key=f'wstyle:{name}'))
+        rows += [
+            Item('sep'),
+            Item('cycle', 'Reverse-mirror run', switch_value('working_mirror'),
+                 value_note(switch_value('working_mirror'),
+                            at_default('working_mirror'), lambda x: ''),
+                 key='working_mirror', choices=ps.CHOICES['working_mirror'],
+                 help='Off runs the frames start to end and starts over; on '
+                      'runs them there and back.'),
+            Item('action', 'Your own frames', frames_value,
+                 value_note(frames_value, at_default('working_frames'),
+                            lambda x: ''),
+                 key='working_frames',
+                 on_delete=lambda s, i: ps.set_value('working_frames', 'default',
+                                                     s.settings_path),
+                 edit_start=lambda x, i: (lambda v: '' if v in ('', 'default')
+                                          else str(v))(
+                     x.settings.get('working_frames', 'default')),
+                 on_edit=edit_working_frames,
+                 help='Separate frames with spaces, or write them run together. '
+                      'Two or more; typing them picks the custom row above.'),
+            Item('sep'),
+            Item('action', 'Back', lambda x: '', key='back'),
+        ]
+        return rows
+
+    def act(s: State, item: Item) -> bool:
+        if item.key == 'back':
+            return False
+        if item.key.startswith('wstyle:'):
+            ps.set_value('working_style', item.key[7:], s.settings_path)
+        return True
+
+    def edit_working_frames(s: State, item: Item, text: str) -> None:
+        if not text.strip():
+            ps.set_value('working_frames', 'default', s.settings_path)
+            return
+        ps.set_value('working_frames', text.strip(), s.settings_path)
+        ps.set_value('working_style', 'custom', s.settings_path)
+
+    def cyc(s: State, item: Item, forward: bool) -> None:
+        if item.key in ps.CHOICES:
+            ps.cycle(item.key, forward, s.settings_path)
+
+    # Kimi holds the moon 120 ms and the braille set 80; the working spinner is
+    # the moon's slot, so its preview turns at the moon's speed unless the
+    # interval setting says otherwise.
+    return m.Screen(build, activate=act, cycle=cyc, delete=restore_default,
+                    reload=reload_state, aside=working_preview,
+                    frames=lambda x: working_frames(x) or ['—'],
+                    frame_interval=spinner_interval(st),
+                    help_line=m.HELP_DEL, title='Working style')
 
 
 def screen_thinking_style(st: State) -> m.Screen:
@@ -1436,12 +1614,13 @@ def screen_user_message(st: State) -> m.Screen:
                     help_line=m.HELP_DEL, title='User message display')
 
 
-# Three of the groups are not a list of switches but a thing you look at: a
-# spinner, a rotating word, a framed message. Each has a screen written for it,
+# Four of the groups are not a list of switches but a thing you look at:
+# two spinners, a rotating word, a framed message. Each has a screen written for it,
 # and `SETTING_GROUPS` still owns which keys belong where — so the check that
 # every switch is reachable holds for these too.
 DEDICATED = {
     'style': lambda st: screen_thinking_style(st),
+    'working': lambda st: screen_working_style(st),
     'verbs': lambda st: screen_thinking_verbs(st),
     'usermsg': lambda st: screen_user_message(st),
 }

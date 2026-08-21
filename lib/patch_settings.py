@@ -34,6 +34,14 @@ DEFAULTS = {
     'spinner_mirror': 'off',          # on runs the frames forwards then back
     'spinner_interval_ms': 'default',  # default, or 20..2000
     'spinner_frames': 'default',      # the frames `custom` uses, space separated
+    # The second spinner. Kimi turns the moon while it waits on the model or on
+    # a tool, and the braille set while it thinks, so the two are separate
+    # things to look at and separate things to set. `follow` keeps them equal,
+    # which is what the single setting used to do and therefore what an
+    # existing patch-settings.conf still means.
+    'working_style': 'follow',        # follow | default | a preset | custom
+    'working_mirror': 'off',          # on runs the frames forwards then back
+    'working_frames': 'default',      # the frames `custom` uses, space separated
     'thinking_verbs': 'off',          # on | off
     'thinking_verbs_list': 'default',  # the words, comma separated
     'thinking_verbs_format': '{}',    # {} is the word
@@ -56,6 +64,13 @@ CHOICES = {
     'spinner_style': ['default', 'braille', 'dots', 'moon', 'blocks',
                       'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
     'spinner_mirror': ['off', 'on'],
+    # `default` leads, the way it does on every other style list — Kimi's own
+    # answer first, then the ways to depart from it. `follow` is the value the
+    # setting starts on, which the note beside the row says; being second in
+    # the list does not make it less the default.
+    'working_style': ['default', 'follow', 'braille', 'dots', 'moon', 'blocks',
+                      'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
+    'working_mirror': ['off', 'on'],
     # A duration is a number, but only a handful of them are worth having: below
     # 40 ms the difference stops being visible and above 400 the spinner reads
     # as stuck. Offering the useful ones as a list is what lets the whole screen

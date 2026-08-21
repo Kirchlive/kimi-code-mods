@@ -82,8 +82,18 @@ const RATE = String(settings.get('spinner_interval_ms', 'default')).toLowerCase(
 const FRAMES_SETTING = String(settings.get('spinner_frames', 'default'));
 const MIRROR = String(settings.get('spinner_mirror', 'off')).toLowerCase();
 
-if (!['on', 'off'].includes(MIRROR)) {
-  throw new Error(`spinner_mirror must be on or off - got "${MIRROR}"`);
+// The working spinner: the one Kimi turns while it waits on the model or on a
+// tool. `follow` means "whatever the thinking spinner is", which is what this
+// patch did for both arrays before the two could be told apart — so a settings
+// file written back then still means what it meant.
+const W_STYLE = String(settings.get('working_style', 'follow')).toLowerCase();
+const W_FRAMES_SETTING = String(settings.get('working_frames', 'default'));
+const W_MIRROR = String(settings.get('working_mirror', 'off')).toLowerCase();
+
+for (const [name, value] of [['spinner_mirror', MIRROR], ['working_mirror', W_MIRROR]]) {
+  if (!['on', 'off'].includes(value)) {
+    throw new Error(`${name} must be on or off - got "${value}"`);
+  }
 }
 
 const PRESETS = {
@@ -112,18 +122,29 @@ const CHOICES = ['default', 'custom'].concat(Object.keys(PRESETS));
 if (!CHOICES.includes(STYLE)) {
   throw new Error(`spinner_style must be one of ${CHOICES.join(', ')} - got "${STYLE}"`);
 }
+if (!CHOICES.concat(['follow']).includes(W_STYLE)) {
+  throw new Error(`working_style must be one of follow, ${CHOICES.join(', ')}`
+    + ` - got "${W_STYLE}"`);
+}
 
-let custom = null;
-if (STYLE === 'custom') {
-  if (FRAMES_SETTING === 'default' || !FRAMES_SETTING.trim()) {
-    throw new Error('spinner_style is custom but spinner_frames is empty - '
+// Both channels resolve `custom` the same way, and refuse the same way: a
+// style asking for frames that were never written is a typo, not a request
+// for Kimi's own set.
+function resolveCustom(style, raw, styleKey, framesKey) {
+  if (style !== 'custom') return null;
+  if (raw === 'default' || !raw.trim()) {
+    throw new Error(`${styleKey} is custom but ${framesKey} is empty - `
       + 'set the frames, or pick a preset');
   }
-  custom = kimiCodeModsSpinnerFrames(FRAMES_SETTING);
-  if (custom.length < 2) {
-    throw new Error(`spinner_frames needs at least two frames - got ${custom.length}`);
+  const list = kimiCodeModsSpinnerFrames(raw);
+  if (list.length < 2) {
+    throw new Error(`${framesKey} needs at least two frames - got ${list.length}`);
   }
+  return list;
 }
+
+const custom = resolveCustom(STYLE, FRAMES_SETTING, 'spinner_style', 'spinner_frames');
+const wCustom = resolveCustom(W_STYLE, W_FRAMES_SETTING, 'working_style', 'working_frames');
 
 let ms = null;
 if (RATE !== 'default') {
@@ -136,7 +157,10 @@ if (RATE !== 'default') {
   }
 }
 
-if (STYLE === 'default' && ms === null && MIRROR === 'off') {
+// Nothing asked for: every channel on Kimi's own frames, no mirror, no rate.
+// `follow` counts as nothing only while the thinking spinner is also untouched.
+const wantsWorking = !(W_STYLE === 'follow' || W_STYLE === 'default') || W_MIRROR === 'on';
+if (STYLE === 'default' && ms === null && MIRROR === 'off' && !wantsWorking) {
   throw new Error('already patched');
 }
 
@@ -187,15 +211,29 @@ function writeFrames(name, list) {
 const isMirrored = list =>
   list.length % 2 === 0 && list.every((f, i) => f === list[list.length - 1 - i]);
 
-for (const name of ['BRAILLE_SPINNER_FRAMES', 'MOON_SPINNER_FRAMES']) {
-  if (STYLE === 'default' && MIRROR === 'off') break;
-  const found = readFrames(name);
-  const chosen = STYLE === 'default' ? found.list
-    : (STYLE === 'custom' ? custom : PRESETS[STYLE]);
-  const wanted = MIRROR === 'on' && !isMirrored(chosen)
+// One array per channel. `BRAILLE_SPINNER_FRAMES` is what Kimi shows while it
+// thinks and composes; `MOON_SPINNER_FRAMES` is what it turns while it waits on
+// the model or on a tool. Setting them separately is the whole point of
+// `working_style` — before it existed both got the same frames, which made the
+// choice follow Kimi around instead of describing what it was doing.
+const CHANNELS = [
+  { name: 'BRAILLE_SPINNER_FRAMES', style: STYLE, mirror: MIRROR, custom },
+  {
+    name: 'MOON_SPINNER_FRAMES',
+    style: W_STYLE === 'follow' ? STYLE : W_STYLE,
+    mirror: W_STYLE === 'follow' ? MIRROR : W_MIRROR,
+    custom: W_STYLE === 'follow' ? custom : wCustom,
+  },
+];
+for (const channel of CHANNELS) {
+  if (channel.style === 'default' && channel.mirror === 'off') continue;
+  const found = readFrames(channel.name);
+  const chosen = channel.style === 'default' ? found.list
+    : (channel.style === 'custom' ? channel.custom : PRESETS[channel.style]);
+  const wanted = channel.mirror === 'on' && !isMirrored(chosen)
     ? chosen.concat([...chosen].reverse())
     : chosen;
-  const replacement = writeFrames(name, wanted);
+  const replacement = writeFrames(channel.name, wanted);
   if (replacement === found.text) continue;
   out = out.replace(found.text, () => replacement);
 }
