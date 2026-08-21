@@ -247,20 +247,19 @@ def tint(text: str, hex_value: str) -> str:
     return f'{code}{text}\x1b[0m' if code else text
 
 
-# Bold *and* underlined. Bold alone is a real difference but not a reliable
-# one: at small sizes, on a light palette, or next to text that is already
-# emphasised it can be hard to be sure which line moved. An underline is
-# positional rather than a matter of weight, so the two together answer the
-# question at a glance instead of after a second look.
-STANDOUT = '\x1b[1;4m'
+# Bold, and only bold. An underline was here too, on the argument that weight
+# alone can be hard to place at a glance — but it draws a rule through a
+# preview whose whole job is to show what a palette looks like, and the arrow
+# in the margin already says which line is meant.
+STANDOUT = '\x1b[1m'
 
 
 def embolden(line: str) -> str:
     """The same line made to stand out, without losing any of its colours.
 
     The styling cannot simply wrap the line: each coloured run already ends in
-    a reset, and a reset clears weight and underline along with colour — so a
-    single sequence in front would survive exactly as far as the first `tint`.
+    a reset, and a reset clears weight along with colour — so a single
+    sequence in front would survive exactly as far as the first `tint`.
     Setting it again after every reset is what carries it across the whole
     line rather than its first few characters.
     """
@@ -967,7 +966,7 @@ def _selfcheck() -> int:
         # only an arrow: the line itself is what you are looking at.
         marked = preview(BUILT_IN['dark'], 'roleUser')
         check('the edited token is marked', any('◀' in l for l in marked))
-        check('and its line is drawn bold and underlined',
+        check('and its line is drawn bold',
               any(STANDOUT in l and 'list the dir' in l for l in marked),
               [l for l in marked if 'list the dir' in l])
         check('and named under the frame',
@@ -983,8 +982,8 @@ def _selfcheck() -> int:
         heavy = embolden(line)
         check('every coloured run in a line carries the styling',
               heavy.count(STANDOUT) == 3, heavy.count(STANDOUT))
-        check('and it is bold and underlined, not one or the other',
-              STANDOUT == '\x1b[1;4m', STANDOUT)
+        check('and it is bold, with no underline through the preview',
+              STANDOUT == '\x1b[1m', STANDOUT)
         check('and the text is unchanged', m.ANSI.sub('', heavy) == 'ab',
               m.ANSI.sub('', heavy))
         check('bolding does not change how wide a line is',
