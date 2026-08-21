@@ -83,9 +83,12 @@ def paint(text: str, style: str, on: bool) -> str:
 
 # The one line at the bottom of every screen. A submenu adds "esc back",
 # because that is the only key whose meaning differs between the two.
-HELP_ROOT = '  ↑↓/wheel move · enter open · ‹› change · q quit'
-HELP_SUB = '  ↑↓/wheel move · enter open · ‹› change · esc back'
-HELP_DEL = '  ↑↓/wheel move · enter open · ‹› change · ⌫ remove · esc back'
+# The wheel is not named: it only moves when KIMICODEMODS_MOUSE=1 turns tracking
+# on, and a help line that promises a key which does nothing is worse than a
+# short one.
+HELP_ROOT = '  ↑↓ move · enter open · ‹› change · q quit'
+HELP_SUB = '  ↑↓ move · enter open · ‹› change · esc back'
+HELP_DEL = '  ↑↓ move · enter open · ‹› change · ⌫ remove · esc back'
 
 
 class Item:
@@ -177,6 +180,13 @@ class Screen:
         return ['', ' ' + self.title] if self.title else ['']
 
     def activate(self, st, item) -> bool:
+        # The one place a row hands the terminal to something else: an editor,
+        # kimi-patch.sh, a validator that asks a question. Those read lines,
+        # and a prompt with no cursor is worse than a stray one -- so the
+        # cursor is given back here rather than after every keystroke, which
+        # is what made it blink under the menu on every arrow key. The next
+        # repaint hides it again.
+        show_cursor()
         if item.on_enter is not None:
             return item.on_enter(st, item) is not False
         if self._activate is not None:
@@ -911,12 +921,10 @@ def loop(screen: Screen, st) -> int:
             # prompts, and tracking left on would feed them escape sequences
             # every time the pointer moved. Switching both off between
             # keystrokes costs a few bytes and removes a whole class of
-            # interference. The cursor is shown again for the same reason:
-            # a row may ask a question, and a prompt with no cursor is worse
-            # than one with a stray cursor under the menu.
+            # interference. The cursor stays hidden here; `Screen.activate`
+            # gives it back on the one path that hands the terminal away.
             with raw_mode(mouse=True):
                 key = read_key()
-            show_cursor()
 
             # Enter on a row that is typed into edits it where it stands,
             # rather than opening a screen that hides the list it belongs to.

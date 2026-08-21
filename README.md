@@ -588,9 +588,14 @@ obvious way to stop; and anything an entry runs — the TOML editor,
 `kimi-patch.sh`, your `$EDITOR` — gets a clean terminal rather than a stream
 of mouse reports in its stdin. `MOUSE-CLICK.md` has the background.
 
-While tracking is on, a drag belongs to the menu, not to the terminal, so
-selecting text to copy it does nothing. Most terminals hand the selection back
-when a modifier is held — Option on macOS Terminal and iTerm2, Shift on
-GNOME Terminal, Konsole and PuTTY. To keep the pointer out of the menu
-altogether, set `TWEAKKIMI_MOUSE=0` (or `off`); clicks then go to the terminal
-and the menu stays keyboard-driven.
+Tracking is off unless you ask for it. While it is on, a drag belongs to the
+menu rather than to the terminal, so selecting text to copy it does nothing —
+and reading back what a patch run said is worth more than clicking a row the
+arrow keys already reach. `KIMICODEMODS_MOUSE=1` (or `on`) turns clicks and the
+wheel on for the session; the help line does not name the wheel, because by
+default it does not move anything.
+
+One thing the setting cannot give back: the screen is redrawn from the top on
+every keystroke, and that erases the scrollback along with it. A selection
+survives only until the next key is pressed, which is long enough to copy but
+not longer.
