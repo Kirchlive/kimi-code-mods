@@ -2,8 +2,9 @@
 
 <img src="https://i.imgur.com/b5tyef7.jpeg" alt="Welcome to Kimi Code Mods!" width="880">
 
-**A terminal menu that patches your Kimi Code install — spinners, themes,
-prompts, defaults — and can always put it back.**
+**A terminal menu that patches your Kimi Code install — reasoning effort, the
+tool catalogue, transcript window, system prompts, hooks and defaults, plus the
+way it looks — and can always put it back.**
 
 [![macOS](https://img.shields.io/badge/macOS-supported-EA4242)](#requirements)
 [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-0.38.0-EA4242)](#version-compatibility)
@@ -24,13 +25,32 @@ starting from a pristine copy every time, so nothing accumulates and one
 command undoes all of it.
 
 ```
-❯ Working Style                     ●  ▏▎▍▌▋▊▉█
-  Thinking Style                    ○  ⠋ ⠙ ⠹ ⠸ ⠼
-  User Message Display              ▌ your text, framed
-  Themes                            Kimi-Code-Mods   ← in use
-  ─────────────────────────────────────────────────────────────
-❯ Apply                             run kimi-patch.sh
-  Restore Original Kimi Code        keeps your settings
+❯ Themes                        Kimi's palette, or one of your own
+  Thinking Verbs                rotate a word beside the spinner
+  Thinking Style                the spinner while Kimi thinks, and how fast
+  Working Style                 the other spinner, while it waits on a tool
+  User Message Display          marker, frame and weight of what you typed
+  Misc                          ten switches with no group of their own
+  Toolsets                      named sets of disabled tools, one keystroke
+  Subagent Models               which model each subagent runs on
+  Complexity Effort Router      set reasoning effort per turn from the prompt
+  Tool Setup                    every tool ships in every request; drop what you never use
+  AGENTS.md Alternative Names   also read CLAUDE.md and friends
+  Skill Setup                   Kimi's own skills, and where more are read from
+  Hook Setup                    run a shell command on any of Kimi's 20 events
+  Loop Control                  attempts per step, context held back for the answer
+  Reasoning                     how hard it thinks, and whether thinking is re-sent
+  Transcript Window             how much history goes back each turn — the cost lever
+  Patches                       the JavaScript patches, and what each one did
+  Cost Report                   what every prompt weighs, and what edits saved
+  View System Prompts           read, price and migrate the 69 overrides
+  ────────────────────────────────────────────────────────────────────────────
+  Apply                         extract, patch, repack, re-sign, install
+  Restore Original Kimi Code    put the untouched binary back; settings survive
+  Open config.toml              Kimi's own settings file, in your editor
+  Open Env Profile              variables the launcher exports
+  Open Kimi Code's bundle.js    the extracted JavaScript, to search for anchors
+  Exit
 ```
 
 ## Install
