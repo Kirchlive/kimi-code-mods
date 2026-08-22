@@ -98,41 +98,92 @@ Xcode command line tools for `codesign`.
 
 ## What it changes
 
-Every switch below is off, or on Kimi's own value, until you change it. The
-menu writes to `patch-settings.conf`; **Apply** is what reaches the binary.
+Every switch is on Kimi's own value until you change it. The menu writes to
+`patch-settings.conf` and `~/.kimi-code/config.toml`; **Apply** is what reaches
+the binary.
 
-**Look**
+### Behaviour
 
-- **Themes** — full palette editor over Kimi's 19 colour tokens, with a live
-  preview of a session. Ships two presets that cannot be deleted:
-  `Kimi-Code-Mods` and `Default Kimi`.
-- **Thinking style** — the spinner while Kimi thinks: nine presets, your own
-  frames, speed, and a reverse-mirror run. The preview spins at the speed you
-  set.
-- **Working style** — the *other* spinner, the one turning while Kimi waits on
-  the model or a tool. Kimi keeps two alphabets; this is the second, settable
-  on its own.
-- **Thinking verbs** — rotate a word beside the spinner instead of always
-  saying "working". Your own list, your own format.
-- **User message display** — a marker in front of what you typed, a frame
-  around it, and the weight it is drawn in.
-- **Welcome banner** — greet with *Welcome to Kimi Code Mods!* and put horns
-  on the logo.
-- **Fullscreen renderer** — the alternate screen buffer, patched into the
-  binary so it holds however Kimi is started, not only through a launcher.
+**Misc** — the switches belonging to no group of their own:
 
-**Behaviour**
+| Setting | Values | What it does |
+|---|---|---|
+| Command suggestions | `default` `half` `full` | Height of the slash-command list: Kimi's five, half the window, or nearly full. |
+| Working directory /wd | `off` `on` | Adds a `/wd` command that starts a session in another directory. |
+| Click to position cursor | `off` `on` | Place the cursor in the composer with a mouse click. Fullscreen only. |
+| Line numbers in Read | `on` `off` | Off saves tokens on every read, and costs the model the ability to cite a line. |
+| Expanded by default | `off` `thinking` `tools` `both` | Show thinking blocks and tool output unfolded. Costs screen, not tokens. |
+| Read limits | `default` `moderate` `large` | How much one Read returns. Higher trades round trips for context. |
+| Auto-accept plans | `off` `on` | Skip the plan approval prompt. A multi-option plan then has no option chosen. |
+| Composer border | `default` `off` `single` `double` `bold` | The frame around the input box. |
+| Fullscreen renderer | `off` `on` | The alternate screen buffer, patched into the binary so it holds however Kimi is started — not only through a launcher that exports an environment variable. |
+| Welcome banner | `off` `on` | Greet with *Welcome to Kimi Code Mods!* and give the logo its horns. |
 
-- **Toolsets, subagent models, tool setup** — which tools exist, which model
-  each subagent uses.
-- **Complexity effort router** — set reasoning effort per turn from the prompt.
-- **AGENTS.md alternative names** — have Kimi read `CLAUDE.md` as well.
-- **Skills, hooks, loop control, reasoning, transcript window** — Kimi's own
-  `config.toml` keys, edited where you can see what they do.
-- **Misc** — slash-command popup height, `/wd` for changing directory,
-  click-to-position-cursor, read limits, line numbers, auto-accept plans.
+**Complexity effort router** — `off` · `pin` · `free`. Sets reasoning effort per
+turn from the prompt itself; `pin` only ever raises it, never lowers.
 
-**Prompts**
+**AGENTS.md alternative names** — `off` · `claude` · `all`. Have Kimi also read
+`CLAUDE.md` and friends. `AGENTS.md` keeps priority, one file per directory.
+
+**Tool setup** — every tool description ships in every request, so an unused
+tool is a tax on each turn. Turn tools off individually and see what the
+catalogue weighs.
+
+**Toolsets** — named lists of disabled tools, applied in one keystroke, so a
+"minimal" and a "full" setup are one row apart.
+
+**Subagent models** — which model each subagent runs on. Needs Kimi's
+secondary-model flag.
+
+**Skill setup** — Kimi's own product skills, and which directories skills are
+read from.
+
+**Hook setup** — run a shell command on any of Kimi's 20 events.
+
+**Loop control** — attempts per step, and how much context is held back for the
+answer.
+
+**Reasoning** — how hard the model thinks, and whether thinking is re-sent with
+each turn.
+
+**Transcript window** — how much history goes back with every turn. The one
+lever that moves running cost directly.
+
+**Patches** — the JavaScript patches themselves: what each one is, whether it
+applied, and what it did to the bundle.
+
+### Look
+
+**Themes** — a palette editor over Kimi's 19 colour tokens with a live preview
+of a session, and two presets that cannot be deleted: `Kimi-Code-Mods` (Kimi's
+dark palette with the project red) and `Default Kimi`.
+
+**Thinking style** — the spinner while Kimi thinks and composes:
+
+| Setting | Values |
+|---|---|
+| Spinner shape | `default` `braille` `dots` `moon` `blocks` `wave` `glow` `colors` `arc` `star` `custom` |
+| Spinner speed | `default`, or 20–2000 ms per frame |
+| Your own frames | any characters, space separated |
+| Reverse-mirror run | `off` `on` — run the frames there and back, so it swings instead of jumping |
+
+**Working style** — the *other* spinner, the one turning while Kimi waits on the
+model or a tool. Kimi keeps two alphabets and used to change both at once; this
+is the second, settable on its own. Same presets plus `follow`, which keeps it
+equal to the thinking spinner.
+
+**Thinking verbs** — rotate a word beside the spinner instead of always saying
+"working": on or off, your own word list, and the format they are drawn in.
+
+**User message display** — how your own messages appear in the transcript:
+
+| Setting | Values |
+|---|---|
+| Your message marker | any prefix; Kimi's own is a sparkle |
+| Your message border | `off` `round` `single` `double` `bold` `topbottom` |
+| Your message style | `default` `plain` `italic` `dim` `underline` `strikethrough` |
+
+### Prompts
 
 69 system prompts are extracted out of the binary into `system-prompts/`. Edit
 one as plain Markdown and it replaces the original on the next run. A prompt
