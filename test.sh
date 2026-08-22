@@ -119,6 +119,15 @@ check $? 'a no-op run still writes the bundle through'
 printf 'throw new Error("anchor not found");\n' > "$P/boom.js"
 node "$HERE/lib/run-patches.mjs" "$D/in.js" "$D/out.js" "$P" >/dev/null 2>&1
 [ $? -ne 0 ]; check $? 'a real patch failure exits non-zero'
+
+# Both stages are piped through `tee` so the summary at the end can count what
+# happened. That is only safe while `pipefail` is set: without it the status of
+# the pipeline is tee's, which never fails, and a failed patch would sail past
+# the guard and get installed.
+grep -q 'set -euo pipefail' "$HERE/kimi-patch.sh"
+check $? 'kimi-patch.sh still sets pipefail'
+bash -c 'set -euo pipefail; if ! (exit 3) | tee /dev/null >/dev/null; then exit 0; fi; exit 1'
+check $? 'a failing stage still fails the run when tee-d'
 rm "$P/boom.js"; printf 'return 42;\n' > "$P/wrong.js"
 node "$HERE/lib/run-patches.mjs" "$D/in.js" "$D/out.js" "$P" >/dev/null 2>&1
 [ $? -ne 0 ]; check $? 'a patch returning a non-string is rejected'

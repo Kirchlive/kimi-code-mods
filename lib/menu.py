@@ -890,6 +890,26 @@ def pick(title: str, options: list[str], hint: str = '', note=None):
     return chosen
 
 
+def hold_for(seconds: float) -> None:
+    """Leave what is on screen alone for a while, or until a key is pressed.
+
+    The counterpart to `press_any` for a command that says everything it has
+    to say before it exits: waiting for a keystroke would be asking for an
+    acknowledgement nobody owes, and repainting at once would wipe the summary
+    before it could be read. Any key cuts it short, so the pause is never in
+    the way.
+
+    Nothing is printed to announce it. A line saying the menu returns in five
+    seconds is itself something to read in those five seconds, and it sits
+    under a summary that is the reason for the pause.
+    """
+    if not sys.stdin.isatty():
+        return
+    with raw_mode():
+        if key_ready(timeout=seconds):
+            read_key()
+
+
 def press_any(message: str = '') -> None:
     """Say something the next repaint would wipe out, and wait for a key.
 

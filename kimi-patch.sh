@@ -341,7 +341,9 @@ $SEA extract "$BASELINE" "$WORK/bundle.js" "$WORK/meta.json"
 STAGE="$WORK/bundle.js"
 if [ -d "$PROMPT_DIR" ]; then
   echo "prompt overrides from $(basename "$PROMPT_DIR")/:"
-  if ! python3 "$HERE/lib/apply-prompt-overrides.py" "$STAGE" "$PROMPT_DIR" "$WORK/bundle.prompts.js"; then
+  # Tee'd rather than captured: the run takes a minute and watching it work
+  # is half of knowing that it did. The copy is only read at the end, to count.
+  if ! python3 "$HERE/lib/apply-prompt-overrides.py" "$STAGE" "$PROMPT_DIR" "$WORK/bundle.prompts.js" 2>&1 | tee "$WORK/prompts.log"; then
     echo >&2
     echo "ERROR: a prompt override was rejected — the installed binary was not touched." >&2
     exit 1
@@ -350,7 +352,7 @@ if [ -d "$PROMPT_DIR" ]; then
 fi
 
 echo "applying $(ls "$PATCH_DIR"/*.js 2>/dev/null | wc -l | tr -d ' ') patch(es):"
-if ! node "$HERE/lib/run-patches.mjs" "$STAGE" "$WORK/bundle.patched.js" "$PATCH_DIR"; then
+if ! node "$HERE/lib/run-patches.mjs" "$STAGE" "$WORK/bundle.patched.js" "$PATCH_DIR" 2>&1 | tee "$WORK/patches.log"; then
   echo >&2
   echo "ERROR: a patch failed — the installed binary was not touched." >&2
   echo "       Unlike tweakcc, nothing is restored over the target before patching," >&2
@@ -382,6 +384,34 @@ if ! $SEA verify "$BIN" "$VERSION"; then
   $SEA sign "$BIN"
   exit 1
 fi
+
+# --- what just happened, in one block ---------------------------------------
+# The run scrolls past faster than it can be read, and the menu comes back over
+# it. Everything that matters is restated here: how many patches took, how many
+# had nothing to do, and whether anything was left behind. A failure never gets
+# this far — the script exits at the step that failed — so reaching this block
+# is itself the headline.
+P_LINE="$(grep -oE '[0-9]+ applied, [0-9]+ no-op' "$WORK/patches.log" 2>/dev/null | tail -1 || true)"
+O_LINE="$(sed -n 's/^prompt overrides: //p' "$WORK/prompts.log" 2>/dev/null \
+          | sed 's/ (.*)$//' | tail -1 || true)"
+MISSING="$(sed -n 's/.*, \([0-9]*\) anchor missing.*/\1/p' "$WORK/prompts.log" 2>/dev/null | tail -1)"
+
+echo
+echo "────────────────────────────────────────────────────────────"
+echo " Apply summary"
+echo
+[ -n "${P_LINE:-}" ] && echo "   patches   ${P_LINE}, 0 failed"
+[ -n "${O_LINE:-}" ] && echo "   prompts   ${O_LINE}"
+echo "   binary    repacked, re-signed ad-hoc, verified $VERSION"
+if [ -n "${MISSING:-}" ] && [ "${MISSING:-0}" -gt 0 ] 2>/dev/null; then
+  echo
+  echo "   ${MISSING} prompt override(s) have no anchor in this build — Kimi moved"
+  echo "   that text, so those files cannot be applied until they are re-extracted."
+  echo "   Nothing was lost: they were unchanged copies."
+fi
+echo
+echo "   result    OK — Kimi Code $VERSION is patched and installed"
+echo "────────────────────────────────────────────────────────────"
 
 echo
 echo "Kimi Code $VERSION patched and installed at $BIN"
