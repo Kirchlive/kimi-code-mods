@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-line installer for kimi-code-mods.
 #
-#   curl -fsSL https://raw.githubusercontent.com/robliv/kimi-code-mods/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Kirchlive/kimi-code-mods/main/install.sh | bash
 #
 # What it does, in order: check what is needed, fetch the repository into
 # ~/.kimi-code-mods, and put a `kimi-code-mods` command on PATH. It writes
@@ -19,7 +19,7 @@
 # from a local checkout instead of downloading.
 set -euo pipefail
 
-REPO="${KIMICODEMODS_REPO:-robliv/kimi-code-mods}"
+REPO="${KIMICODEMODS_REPO:-Kirchlive/kimi-code-mods}"
 BRANCH="${KIMICODEMODS_BRANCH:-main}"
 DEST="${KIMICODEMODS_DEST:-$HOME/.kimi-code-mods}"
 BINDIR="${KIMICODEMODS_BINDIR:-$HOME/.local/bin}"

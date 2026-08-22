@@ -1,6 +1,6 @@
 # One-line installer for kimi-code-mods on Windows.
 #
-#   iwr -useb https://raw.githubusercontent.com/robliv/kimi-code-mods/main/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/Kirchlive/kimi-code-mods/main/install.ps1 | iex
 #
 # WHAT THIS CAN AND CANNOT DO
 # The patcher is macOS code: it reads the Mach-O header of Kimi's binary to
@@ -16,7 +16,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo   = if ($env:KIMICODEMODS_REPO)   { $env:KIMICODEMODS_REPO }   else { 'robliv/kimi-code-mods' }
+$Repo   = if ($env:KIMICODEMODS_REPO)   { $env:KIMICODEMODS_REPO }   else { 'Kirchlive/kimi-code-mods' }
 $Branch = if ($env:KIMICODEMODS_BRANCH) { $env:KIMICODEMODS_BRANCH } else { 'main' }
 
 function Say  ($m) { Write-Host $m }
