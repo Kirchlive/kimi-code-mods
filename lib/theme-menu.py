@@ -455,15 +455,19 @@ def screen_tokens(st: ThemeState) -> m.Screen:
         if s.message:
             rows.append(Item('info', s.message))
         rows.append(Item('sep'))
-        rows.append(Item('cycle', 'Base palette',
-                         lambda x: x.theme.get('base', 'dark'), key='__base',
-                         choices=['dark', 'light'],
-                         help='Tokens you do not set fall back to this palette.'))
+        # Putting it into use comes first, because it is what the line above
+        # says is missing: a theme not in use shows nothing, so the row that
+        # fixes that belongs where the eye lands, not under the palette
+        # setting it makes no difference to yet.
         if in_use != s.name:
             rows.append(Item('action', 'Use this theme',
                              lambda x: f'tui.toml says "{in_use}"', key='__use',
                              help='Writes it to tui.toml, so what you change here '
                                   'is what you see at the next start.'))
+        rows.append(Item('cycle', 'Base palette',
+                         lambda x: x.theme.get('base', 'dark'), key='__base',
+                         choices=['dark', 'light'],
+                         help='Tokens you do not set fall back to this palette.'))
         rows.append(Item('sep'))
         for token, what in TOKENS:
             value = palette.get(token, '')
