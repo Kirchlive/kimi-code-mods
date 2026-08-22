@@ -5,7 +5,7 @@ variant: plain
 chars: 2991
 originSha256: c804e62cb4468eb2
 trailingNewlines: 1
-bundleOffset: 11716146
+bundleOffset: 9239532
 -->
 ---
 name: consolidate

@@ -5,7 +5,7 @@ variant: plain
 chars: 576
 originSha256: 0e406c1918eccb0e
 trailingNewlines: 1
-bundleOffset: 13101777
+bundleOffset: 13759649
 -->
 Search the web for information. Use this when you need up-to-date information from the internet.
 

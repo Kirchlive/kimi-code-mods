@@ -2,10 +2,10 @@
 source: ../../packages/agent-core-v2/src/agent/tools/os/read/read.md
 module: read_default
 variant: plain
-chars: 2645
-originSha256: e02da16b34aaf3b8
+chars: 2550
+originSha256: 4c3a77c7034cb726
 trailingNewlines: 1
-bundleOffset: 9098068
+bundleOffset: 9831407
 -->
 Read a text file from the local filesystem.
 
@@ -17,7 +17,7 @@ When you need several files, prefer to read them in parallel: emit multiple `Rea
 - Returns up to ${MAX_LINES} lines or ${MAX_BYTES_KB} KB per call, whichever comes first; lines longer than ${MAX_LINE_LENGTH} chars are truncated mid-line.
 - Page larger files with `line_offset` (1-based start line) and `n_lines`. Omit `n_lines` to read up to the ${MAX_LINES}-line cap.
 - Sensitive files (`.env` files, credential stores, SSH private keys, and similar secrets) are refused to protect secrets; do not attempt to read them. Templates and public keys are exempt: `.env.example` / `.env.sample` / `.env.template` and public SSH keys such as `id_rsa.pub` read normally.
-- UTF-8 text files are read directly. UTF-16 LE/BE text files (with or without a BOM) are detected automatically and transcoded to UTF-8 for display; the status block notes the detected encoding, and Edit/Write on such a file still expect UTF-8 — convert its encoding first (e.g. `iconv` via Bash). Other encodings (e.g. GBK), binary files, and files containing NUL bytes are refused; use `ReadMediaFile` for images or video, and Bash or an MCP tool for other binary formats.
+- UTF-8 text files are read directly. UTF-16 LE/BE text files (with or without a BOM) are detected automatically and transcoded to UTF-8 for display; the status block notes the detected encoding, and Edit/Write on such a file still expect UTF-8 — convert its encoding first (e.g. with `iconv`). Other encodings (e.g. GBK), binary files, and files containing NUL bytes are refused.
 - Negative line_offset reads from the end of the file (for example, -100 reads the last 100 lines); the absolute value cannot exceed ${MAX_LINES}.
 - Output format: `<line-number>\t<content>` per line.
 - A `<system>...</system>` status block is appended after the file content; it summarizes how much was read (line and byte counts, truncation, line-ending notes) and is not part of the file itself.

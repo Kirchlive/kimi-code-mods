@@ -5,7 +5,7 @@ variant: plain
 chars: 788
 originSha256: 46482066bce16bcd
 trailingNewlines: 1
-bundleOffset: 12252559
+bundleOffset: 13022922
 -->
 When `run_in_background=true`, the subagent runs detached from this turn. The completion arrives in a later turn as a synthetic user-role message containing its result — you do not need to poll, sleep, or check on its progress. Continue with other work or respond to the user. Never fabricate or predict what the result will say.
 

@@ -5,7 +5,7 @@ variant: plain
 chars: 2203
 originSha256: 905a58415199e9d8
 trailingNewlines: 1
-bundleOffset: 13427291
+bundleOffset: 14039070
 -->
 Read media content from a file.
 

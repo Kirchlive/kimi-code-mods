@@ -5,7 +5,7 @@ variant: mustache
 chars: 1528
 originSha256: 51b97ded442f35a7
 trailingNewlines: 1
-bundleOffset: 11928853
+bundleOffset: 12595052
 -->
 Launch multiple subagents from one prompt template, existing agent resumes, or both.
 

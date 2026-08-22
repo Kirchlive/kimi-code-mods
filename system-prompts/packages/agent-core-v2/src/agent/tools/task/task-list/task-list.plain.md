@@ -5,7 +5,7 @@ variant: plain
 chars: 1370
 originSha256: 87f1b592c1fb1d64
 trailingNewlines: 1
-bundleOffset: 12085283
+bundleOffset: 12867106
 -->
 List background tasks and their current status.
 

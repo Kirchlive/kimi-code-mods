@@ -5,7 +5,7 @@ variant: plain
 chars: 1211
 originSha256: dd3b115d34fd5c53
 trailingNewlines: 1
-bundleOffset: 9114827
+bundleOffset: 9848569
 -->
 Create, append to, or replace a file entirely.
 

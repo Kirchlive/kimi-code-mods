@@ -5,7 +5,7 @@ variant: plain
 chars: 3298
 originSha256: 513ef7bbedf6a8bf
 trailingNewlines: 1
-bundleOffset: 11682566
+bundleOffset: 9205401
 -->
 ---
 name: check-kimi-code-docs

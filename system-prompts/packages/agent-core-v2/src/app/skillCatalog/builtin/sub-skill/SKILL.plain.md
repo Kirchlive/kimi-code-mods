@@ -5,7 +5,7 @@ variant: plain
 chars: 1124
 originSha256: 720c3fcd530efd96
 trailingNewlines: 1
-bundleOffset: 11722372
+bundleOffset: 9245758
 -->
 ---
 name: sub-skill

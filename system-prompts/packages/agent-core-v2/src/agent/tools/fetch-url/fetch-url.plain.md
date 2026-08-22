@@ -5,7 +5,7 @@ variant: plain
 chars: 877
 originSha256: c25703ad0ddd23da
 trailingNewlines: 1
-bundleOffset: 13172480
+bundleOffset: 13819476
 -->
 Fetch content from a URL. The content is returned either as the main text extracted from the page, or as the full response body verbatim; a note at the top of the result states which of the two you received, so you can judge how complete it is. Use this when you need to read a specific web page.
 

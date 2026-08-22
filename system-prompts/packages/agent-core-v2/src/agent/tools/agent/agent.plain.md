@@ -5,7 +5,7 @@ variant: plain
 chars: 1939
 originSha256: 24e804dbe4e2fcab
 trailingNewlines: 1
-bundleOffset: 12253519
+bundleOffset: 13023882
 -->
 Launch a subagent to handle a task. The subagent runs as a same-process loop instance with its own context and wire file. Delegating also keeps the bulk of intermediate file contents out of your own context — you get a conclusion back instead of a pile of dumps.
 

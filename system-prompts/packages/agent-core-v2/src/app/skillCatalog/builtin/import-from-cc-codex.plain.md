@@ -5,7 +5,7 @@ variant: plain
 chars: 10259
 originSha256: 0577e68ebc1c989e
 trailingNewlines: 1
-bundleOffset: 11697437
+bundleOffset: 9220272
 -->
 ---
 name: import-from-cc-codex

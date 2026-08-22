@@ -5,7 +5,7 @@ variant: plain
 chars: 1017
 originSha256: 4fe38d97bb1e3a91
 trailingNewlines: 1
-bundleOffset: 9062730
+bundleOffset: 9807279
 -->
 Search file contents using regular expressions (powered by ripgrep).
 

@@ -1,0 +1,10 @@
+<!--
+source: ../../packages/agent-core/src/tools/builtin/collaboration/skill-tool.md
+module: skill_tool_default
+variant: plain
+chars: 569
+originSha256: 682fe740e5a47ca2
+trailingNewlines: 0
+bundleOffset: 5852779
+-->
+Invoke a registered skill from the current skill listing. BLOCKING REQUIREMENT: when a skill from the listing matches the user's request, you MUST call this tool (not free-form text). Do not re-invoke a skill to repeat work already done: if a `<kimi-skill-loaded>` block for it with the same `args` is already present in the conversation, follow those instructions directly instead of calling the tool again. Do call the tool again when you need the skill with different arguments — the loaded block was expanded with the earlier `args` and will not reflect new inputs.

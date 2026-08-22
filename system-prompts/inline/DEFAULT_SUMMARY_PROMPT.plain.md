@@ -5,7 +5,7 @@ variant: plain
 chars: 1323
 originSha256: b277261f2c3e47f8
 trailingNewlines: 0
-bundleOffset: 235946
+bundleOffset: 235972
 -->
 You have been working on the task described above but have not yet completed it. Write a continuation summary that will allow you (or another instance of yourself) to resume work efficiently in a future context window where the conversation history will be replaced with this summary. Your summary should be structured, concise, and actionable. Include:
 1. Task Overview

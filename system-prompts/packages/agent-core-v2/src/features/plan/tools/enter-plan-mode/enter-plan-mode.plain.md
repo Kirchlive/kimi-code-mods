@@ -5,7 +5,7 @@ variant: plain
 chars: 1753
 originSha256: 0050e6484a451e81
 trailingNewlines: 1
-bundleOffset: 11840577
+bundleOffset: 12416605
 -->
 Use this tool proactively when you're about to start a non-trivial implementation task.
 Getting user sign-off on your approach via ExitPlanMode before writing code prevents wasted effort.

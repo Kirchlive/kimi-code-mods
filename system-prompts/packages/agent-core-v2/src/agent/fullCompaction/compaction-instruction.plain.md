@@ -5,7 +5,7 @@ variant: plain
 chars: 4483
 originSha256: b46cbabe39aa5119
 trailingNewlines: 1
-bundleOffset: 13300106
+bundleOffset: 13911393
 -->
 You are about to run out of context. Write a first-person handoff note to
 yourself so you can seamlessly continue this task after the earlier

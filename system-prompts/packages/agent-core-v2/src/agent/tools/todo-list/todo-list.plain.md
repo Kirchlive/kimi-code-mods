@@ -5,7 +5,7 @@ variant: plain
 chars: 2142
 originSha256: 217a2f432e3128ae
 trailingNewlines: 1
-bundleOffset: 13564895
+bundleOffset: 14162885
 -->
 Use this tool to maintain a structured TODO list as you work through a multi-step task. Use it proactively and often when progress tracking helps the current work. This is especially useful in long-running investigations and implementation tasks with several tool calls; in plan mode, write the plan to the plan file rather than tracking it here.
 

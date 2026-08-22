@@ -5,7 +5,7 @@ variant: plain
 chars: 244
 originSha256: 654535a0be4e4015
 trailingNewlines: 0
-bundleOffset: 12210291
+bundleOffset: 12799632
 -->
 Your previous response was too brief. Please provide a more comprehensive summary that includes:
 

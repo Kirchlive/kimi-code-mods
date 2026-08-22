@@ -5,7 +5,7 @@ variant: plain
 chars: 10060
 originSha256: def8ed339dca72eb
 trailingNewlines: 1
-bundleOffset: 11724880
+bundleOffset: 9248266
 -->
 ---
 name: update-config

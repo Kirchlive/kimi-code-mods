@@ -5,7 +5,7 @@ variant: plain
 chars: 10760
 originSha256: af29520e1c26668d
 trailingNewlines: 1
-bundleOffset: 11735920
+bundleOffset: 9259306
 -->
 ---
 name: write-goal

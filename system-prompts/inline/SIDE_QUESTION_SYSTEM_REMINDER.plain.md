@@ -5,7 +5,7 @@ variant: plain
 chars: 704
 originSha256: dc996beb28f7e2fa
 trailingNewlines: 1
-bundleOffset: 11834841
+bundleOffset: 12410899
 -->
 
 This is a side-channel conversation with the user. You should answer user questions directly based on what you already know.

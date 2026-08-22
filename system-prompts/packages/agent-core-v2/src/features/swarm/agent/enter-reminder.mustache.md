@@ -5,7 +5,7 @@ variant: mustache
 chars: 1782
 originSha256: 126b9f6d17b32b1b
 trailingNewlines: 1
-bundleOffset: 11890421
+bundleOffset: 12555641
 -->
 ## Swarm Mode
 

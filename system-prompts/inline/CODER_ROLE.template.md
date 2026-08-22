@@ -5,7 +5,7 @@ variant: template
 chars: 442
 originSha256: 17e94bd149097c12
 trailingNewlines: 0
-bundleOffset: 12211709
+bundleOffset: 12995507
 -->
 ${TASK_AGENT_ROLE_PREFIX}
 

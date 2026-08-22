@@ -5,7 +5,7 @@ variant: plain
 chars: 9504
 originSha256: f6b90a9adc8f2f75
 trailingNewlines: 1
-bundleOffset: 11686834
+bundleOffset: 9209669
 -->
 ---
 name: custom-theme

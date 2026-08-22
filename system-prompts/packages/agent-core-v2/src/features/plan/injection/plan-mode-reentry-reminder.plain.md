@@ -5,7 +5,7 @@ variant: plain
 chars: 1079
 originSha256: 96c1752c3341cb11
 trailingNewlines: 1
-bundleOffset: 11867413
+bundleOffset: 12444329
 -->
 Plan mode is active. You MUST NOT make any edits (with the exception of the current plan file) or otherwise make changes to the system unless a tool request is explicitly approved. Prefer read-only tools. Use Bash only when needed; Bash follows the normal permission mode and rules. This supersedes any other instructions you have received.
 

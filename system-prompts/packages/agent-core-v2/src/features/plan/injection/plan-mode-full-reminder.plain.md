@@ -5,7 +5,7 @@ variant: plain
 chars: 2130
 originSha256: 61257075fb9c45f3
 trailingNewlines: 1
-bundleOffset: 11861445
+bundleOffset: 12438361
 -->
 Plan mode is active. You MUST NOT make any edits (with the exception of the current plan file) or otherwise make changes to the system unless a tool request is explicitly approved. Prefer read-only tools. Use Bash only when needed; Bash follows the normal permission mode and rules. This supersedes any other instructions you have received. TaskStop, CronCreate, and CronDelete are also blocked in plan mode — call ExitPlanMode first if you need them.
 

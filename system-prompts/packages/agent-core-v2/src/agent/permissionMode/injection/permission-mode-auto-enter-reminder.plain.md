@@ -5,7 +5,7 @@ variant: plain
 chars: 516
 originSha256: 0975f1c992338bdc
 trailingNewlines: 1
-bundleOffset: 13458378
+bundleOffset: 14077026
 -->
 Auto permission mode is active. Tool approvals will be handled automatically while this mode remains enabled.
   - Continue normally without pausing for approval prompts.

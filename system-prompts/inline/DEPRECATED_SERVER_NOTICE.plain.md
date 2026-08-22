@@ -5,7 +5,7 @@ variant: plain
 chars: 312
 originSha256: 57ef0405773a139c
 trailingNewlines: 1
-bundleOffset: 17167894
+bundleOffset: 17963573
 -->
 `kimi server` has been deprecated and no longer works.
 Use `kimi web` instead — it runs the local server in the foreground and opens the web UI (`--no-open` to skip).

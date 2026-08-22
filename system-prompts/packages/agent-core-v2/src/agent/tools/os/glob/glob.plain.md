@@ -5,7 +5,7 @@ variant: plain
 chars: 1495
 originSha256: 0e563054684493b0
 trailingNewlines: 1
-bundleOffset: 9047427
+bundleOffset: 9791433
 -->
 Find files by glob pattern, sorted by modification time (most recent first).
 

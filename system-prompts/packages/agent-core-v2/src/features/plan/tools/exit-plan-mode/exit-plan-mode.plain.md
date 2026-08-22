@@ -5,7 +5,7 @@ variant: plain
 chars: 2202
 originSha256: 43b77adb4c302159
 trailingNewlines: 1
-bundleOffset: 11847179
+bundleOffset: 12423209
 -->
 Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.
 

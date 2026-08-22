@@ -5,7 +5,7 @@ variant: plain
 chars: 1650
 originSha256: 387fe0a810a4bcad
 trailingNewlines: 1
-bundleOffset: 12359677
+bundleOffset: 13088026
 -->
 Use this tool when you need to ask the user questions with structured options during execution. This allows you to:
 1. Collect user preferences or requirements before proceeding

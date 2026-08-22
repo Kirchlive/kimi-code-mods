@@ -6,8 +6,12 @@
 tool catalogue, transcript window, system prompts, hooks and defaults, plus the
 way it looks — and can always put it back.**
 
+[![version](https://img.shields.io/badge/version-1.00.0-EA4242)](https://github.com/Kirchlive/kimi-code-mods/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-EA4242)](#requirements)
 [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-0.38.0-EA4242)](#version-compatibility)
+[![patches](https://img.shields.io/badge/patches-17-EA4242)](#behaviour)
+[![prompts](https://img.shields.io/badge/system%20prompts-132-EA4242)](#prompts)
+[![settings](https://img.shields.io/badge/settings-25-EA4242)](#what-it-changes)
 [![tests](https://img.shields.io/badge/tests-29%20passing-EA4242)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-EA4242)](LICENSE)
 
@@ -43,7 +47,7 @@ command undoes all of it.
   Transcript Window             how much history goes back each turn — the cost lever
   Patches                       the JavaScript patches, and what each one did
   Cost Report                   what every prompt weighs, and what edits saved
-  View System Prompts           read, price and migrate the 69 overrides
+  View System Prompts           read, price and migrate the 132 overrides
   ────────────────────────────────────────────────────────────────────────────
   Apply                         extract, patch, repack, re-sign, install
   Restore Original Kimi Code    put the untouched binary back; settings survive
@@ -205,7 +209,7 @@ equal to the thinking spinner.
 
 ### Prompts
 
-69 system prompts are extracted out of the binary into `system-prompts/`. Edit
+132 system prompts are extracted out of the binary into `system-prompts/`. Edit
 one as plain Markdown and it replaces the original on the next run. A prompt
 whose anchor moved in a Kimi release is reported and skipped, never guessed at.
 

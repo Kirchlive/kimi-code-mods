@@ -13,3 +13,13 @@ __pycache__/
 
 # code index, rebuilt on demand
 .codegraph/
+
+# Working notes from reverse-engineering Kimi — kept locally, not part of the
+# tool. What survived of them is in docs/ and in the comments next to the code
+# they explain.
+FINDINGS*.md
+
+# The pristine prompts of one Kimi version, kept as the base for a three-way
+# merge after an update. Re-extractable from the baseline with
+# `kimi-patch.sh --extract-prompts`, so it is a local artefact like baseline/.
+system-prompts-*/

@@ -847,7 +847,7 @@ def screen_loop(st: Editing) -> m.Screen:
 def screen_hooks(st: Editing) -> m.Screen:
     """Shell commands on Kimi's own events.
 
-    This was written off as dead: `FEATURES.md` recorded the hooks as
+    This was written off as dead: `docs/FEATURES.md` recorded the hooks as
     implemented but ineffective, "the test command wrote not a single line".
     The file that test wrote to was still on disk, with six `session-start`
     lines in it — see `evidence/`. `SessionStart` works. What was not observed

@@ -5,7 +5,7 @@ variant: plain
 chars: 2014
 originSha256: 31502c90b306d4a9
 trailingNewlines: 1
-bundleOffset: 12089046
+bundleOffset: 12870628
 -->
 Retrieve a snapshot of a running or completed background task.
 

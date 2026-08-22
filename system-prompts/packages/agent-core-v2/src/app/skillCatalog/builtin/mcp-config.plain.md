@@ -5,7 +5,7 @@ variant: plain
 chars: 6197
 originSha256: 6b29b1e150158779
 trailingNewlines: 1
-bundleOffset: 11708940
+bundleOffset: 9231775
 -->
 ---
 name: mcp-config

@@ -5,7 +5,7 @@ variant: plain
 chars: 366
 originSha256: 8b302c264cf0837a
 trailingNewlines: 1
-bundleOffset: 11892428
+bundleOffset: 12557648
 -->
 ## Swarm Mode Ended
 

@@ -5,7 +5,7 @@ variant: plain
 chars: 818
 originSha256: 4d97dfd50d4be40a
 trailingNewlines: 0
-bundleOffset: 11517239
+bundleOffset: 9169794
 -->
 Skills are reusable, composable capabilities that enhance your abilities. Each skill is either a self-contained directory with a `SKILL.md` file or a standalone `.md` file that contains instructions, examples, and/or reference material.
 

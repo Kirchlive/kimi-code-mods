@@ -5,7 +5,7 @@ variant: plain
 chars: 5160
 originSha256: 85f31715187d991b
 trailingNewlines: 1
-bundleOffset: 9008612
+bundleOffset: 9752879
 -->
 Execute a `${SHELL_NAME}` command. Use this for shell semantics — pipes, env, processes, git, package managers, build/test runners, anything genuinely interactive or multi-step.
 
