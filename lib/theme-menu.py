@@ -27,7 +27,9 @@ see why, which is the only reason it exists.
 import json
 import os
 import re
+import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -165,6 +167,33 @@ def kimi_home() -> Path:
 def themes_dir() -> Path:
     """Where Kimi looks. `KIMI_CODE_HOME` moves it, and the tests rely on that."""
     return kimi_home() / 'themes'
+
+
+@lru_cache(maxsize=1)
+def kimi_version() -> str:
+    """The version of the installed binary, or '' when it cannot be asked.
+
+    The preview draws Kimi's own header, and a header naming a version that is
+    not the one installed is the preview quietly lying about the thing it
+    exists to show. Asked once per run and cached: this is drawn on every
+    keystroke, and starting a 170 MB binary that often would be felt.
+
+    An empty answer is a fine answer — the caller drops the number rather than
+    printing a stale one.
+    """
+    binary = kimi_home() / 'bin' / 'kimi'
+    try:
+        out = subprocess.run([str(binary), '--version'], capture_output=True,
+                             text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    first = (out.stdout or out.stderr).strip().splitlines()
+    if not first:
+        return ''
+    # Kimi answers with the bare number; anything else is taken as no answer
+    # rather than pasted into the header.
+    hit = re.search(r'\d+\.\d+\.\d+', first[0])
+    return hit.group(0) if hit else ''
 
 
 def tui_config() -> Path:
@@ -359,7 +388,8 @@ def preview(palette: dict, highlight: str = '') -> list[str]:
     # palette entry with nothing to point at is one you have to change blind.
     w = PREVIEW_WIDTH
     body = [
-        ('primary', tint('🌕 Kimi Code 0.36.0', c('primary'))),
+        ('primary', tint('🌕 Kimi Code' + (f' {kimi_version()}' if kimi_version()
+                                           else ''), c('primary'))),
         ('textMuted', tint('   ~/.kimi-code-mods', c('textMuted'))),
         ('', ''),
         ('roleUser', tint('> list the dir', c('roleUser'))),
