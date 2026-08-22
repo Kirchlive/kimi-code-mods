@@ -2,18 +2,20 @@
 
 <img src="https://i.imgur.com/b5tyef7.jpeg" alt="Welcome to Kimi Code Mods!" width="880">
 
-**A terminal menu that patches your Kimi Code install — reasoning effort, the
-tool catalogue, transcript window, system prompts, hooks and defaults, plus the
-way it looks — and can always put it back.**
-
 [![version](https://img.shields.io/badge/version-1.00.0-EA4242)](https://github.com/Kirchlive/kimi-code-mods/releases)
-[![macOS](https://img.shields.io/badge/macOS-supported-EA4242)](#requirements)
 [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-0.38.0-EA4242)](#version-compatibility)
 [![patches](https://img.shields.io/badge/patches-17-EA4242)](#behaviour)
 [![prompts](https://img.shields.io/badge/system%20prompts-132-EA4242)](#prompts)
 [![settings](https://img.shields.io/badge/settings-25-EA4242)](#what-it-changes)
-[![tests](https://img.shields.io/badge/tests-29%20passing-EA4242)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-EA4242)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-patches%20%26%20menu-EA4242)](#requirements)
+[![Linux](https://img.shields.io/badge/Linux-menu-9B3232)](#requirements)
+[![WSL](https://img.shields.io/badge/WSL-menu-9B3232)](#requirements)
+[![Windows](https://img.shields.io/badge/Windows-via%20WSL-9B3232)](#requirements)
+
+**A terminal menu that patches your Kimi Code install — reasoning effort, the
+tool catalogue, transcript window, system prompts, hooks and defaults, plus the
+way it looks — and can always put it back.**
 
 [Install](#install) · [What it changes](#what-it-changes) ·
 [Undo](#undo) · [How it works](#how-it-works) · [Internals](docs/internals.md)
