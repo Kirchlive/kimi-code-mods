@@ -87,6 +87,75 @@ BUILT_IN = {
     },
 }
 
+# The project's own, which is Kimi's dark palette with one token moved: the
+# blue `primary` becomes the red of the banner in README and repo. Everything
+# else is deliberately untouched — a theme that changed twelve tokens would be
+# a different palette rather than this one wearing its own colour.
+BUILT_IN['kimi-code-mods'] = dict(BUILT_IN['dark'], primary='#EA4242')
+
+# Two themes this project ships rather than the user writing them. They are
+# ordinary theme files — Kimi only offers what is on disk, so a preset that
+# existed only in this menu could not be selected with `/theme` — but the menu
+# refuses to delete them and writes them back if they go missing. Names are
+# filenames, hence the dash in `Default-Kimi`; `displayName` carries the space.
+# `kimi-code-mods` is also the name a colour change from elsewhere in the menu
+# writes to (see `OURS` below), and on a case-insensitive filesystem a second
+# file spelled with capitals would *be* that file. One theme, then: this preset
+# seeds it, and a colour changed later lands in the same place.
+# The one a fresh install is pointed at, once, by `ensure_default_theme`.
+DEFAULT_PRESET = 'kimi-code-mods'
+
+PRESETS = {
+    'kimi-code-mods': {
+        'name': 'kimi-code-mods',
+        'displayName': 'Kimi-Code-Mods',
+        'base': 'dark',
+        'colors': {'primary': '#EA4242'},
+    },
+    'Default-Kimi': {
+        'name': 'Default-Kimi',
+        'displayName': 'Default Kimi',
+        'base': 'dark',
+        # Deliberately empty: this *is* Kimi's own palette, offered as a row so
+        # there is a way back that reads like the way out.
+        'colors': {},
+    },
+}
+
+
+def ensure_presets(directory: Path | None = None) -> None:
+    """Write any preset whose file is missing, and leave the rest alone.
+
+    Missing rather than different: a preset that has been edited stays edited.
+    The menu will not delete these two, but nothing stops an editor or a stray
+    `rm`, and a row pointing at a file Kimi cannot load would be worse than a
+    file quietly restored.
+    """
+    directory = directory or themes_dir()
+    for name, theme in PRESETS.items():
+        if not (directory / f'{name}.json').exists():
+            try:
+                write_theme(theme, directory)
+            except OSError:
+                pass
+
+
+def ensure_default_theme() -> str:
+    """Point `tui.toml` at this project's theme, but only the first time.
+
+    The test is whether a `theme =` line exists at all, not what it says: a
+    file that names `auto` has been answered, and answering it again would be
+    this menu overriding a choice rather than making one. Only a file that has
+    never been asked gets `kimi-code-mods` written into it.
+    """
+    try:
+        text = tui_config().read_text()
+    except OSError:
+        text = ''
+    if re.search(r'^\s*theme\s*=', text, re.M):
+        return ''
+    return set_active_theme(DEFAULT_PRESET)
+
 
 def kimi_home() -> Path:
     home = os.environ.get('KIMI_CODE_HOME')
@@ -464,26 +533,53 @@ def screen_themes(st: ThemeState) -> m.Screen:
     """The list of custom themes, and the way to make another."""
 
     def build(s: ThemeState) -> list[Item]:
-        names = list_themes(s.dir)
+        ensure_presets(s.dir)
+        names = [n for n in list_themes(s.dir) if n not in PRESETS]
         rows = [Item('info', f'{s.dir}'),
-                Item('info', 'Kimi ships dark, light and auto; these are yours. '
-                             'Switch with /theme.')]
+                Item('info', 'Kimi ships dark, light and auto; the two below are '
+                             'this project\'s, the rest are yours. Switch with '
+                             '/theme.')]
         if s.message:
             rows.append(Item('info', s.message))
         rows.append(Item('sep'))
         in_use = active_theme()
-        for n in names:
-            t = read_theme(n, s.dir)
-            rows.append(Item('action', n,
-                             (lambda th, mine: lambda x:
-                              f'{len(th.get("colors", {}))} token(s) over '
-                              f'{th.get("base", "dark")}'
-                              + ('   ← in use' if mine else ''))(t, n == in_use),
-                             key=f'edit:{n}', on_delete=delete,
-                             help='enter edits it, backspace deletes the file'))
-        if not names:
-            rows.append(Item('info', 'none yet'))
-        rows += [Item('sep'),
+
+        def theme_row(n: str, preset: bool) -> Item:
+            th = read_theme(n, s.dir)
+            label = th.get('displayName') or n
+            return Item('action', label,
+                        (lambda t_, mine: lambda x:
+                         f'{len(t_.get("colors", {}))} token(s) over '
+                         f'{t_.get("base", "dark")}'
+                         + ('   ← in use' if mine else ''))(th, n == in_use),
+                        key=f'edit:{n}',
+                        # The two presets carry no `on_delete`, which is the
+                        # whole of "cannot be deleted": backspace asks the row
+                        # to remove itself and this row does not answer.
+                        on_delete=None if preset else delete,
+                        help='enter edits it' if preset
+                        else 'enter edits it, backspace deletes the file')
+
+        presets = [theme_row(n, True) for n in PRESETS]
+        mine = [theme_row(n, False) for n in names]
+
+        # The rules above and below the presets are drawn to the width of the
+        # rows they bracket, not to the menu's standard `RULE_WIDTH`: a row
+        # ending in `← in use` runs past that, and a rule stopping short of the
+        # thing it is separating looks like it belongs to something else. A row
+        # is the mark, a space, the label column, the arrow column, a space,
+        # and the value — everything but the two-space indent every line
+        # already carries.
+        widest = max([m.RULE_WIDTH]
+                     + [m.LABEL_WIDTH + 4 + m.visible(r.value(s))
+                        for r in presets + mine])
+        rule = Item('info', '─' * widest)
+
+        rows[-1] = rule                      # the separator opened above
+        rows += presets
+        rows.append(rule)
+        rows += mine
+        rows += [rule,
                  Item('action', 'New theme', lambda x: '', key='new',
                       help='Starts from a built-in palette; you override what you want.'),
                  Item('action', 'Theme in use',
@@ -902,7 +998,11 @@ def _selfcheck() -> int:
         check('the preview still shows the palette it would start from',
               any('Preview' in l for l in narrow.aside(nstate)))
 
-        # Making it is the act of changing a colour, not a step before it.
+        # Making it is the act of changing a colour, not a step before it. The
+        # themes screen seeds the same file as a preset, so it is removed first
+        # — otherwise this would exercise the reuse path that the next check
+        # covers and never the create path it is written for.
+        (d / f'{OURS}.json').unlink(missing_ok=True)
         name2, note = make_theme_to_edit(d)
         check('a theme is created on demand', name2 == OURS, (name2, note))
         check('and put into use', active_theme() == OURS, active_theme())
