@@ -53,6 +53,7 @@ DEFAULTS = {
     # this, which only reaches it when it is started through a launcher that
     # exports the variable. As a patch it holds however Kimi is started.
     'fullscreen': 'off',              # on | off
+    'welcome_banner': 'on',           # on | off — the greeting and the horns
 }
 
 CHOICES = {
@@ -91,6 +92,7 @@ CHOICES = {
                            'strikethrough'],
     'input_box_border': ['default', 'off', 'single', 'double', 'bold'],
     'fullscreen': ['off', 'on'],
+    'welcome_banner': ['off', 'on'],
 }
 
 # Four settings take a value no list can hold: the message marker, your own

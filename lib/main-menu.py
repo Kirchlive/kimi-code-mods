@@ -769,6 +769,10 @@ PATCH_HELP = {
     'user_message_style': (
         'Your message style',
         'How your own text is drawn. Kimi\'s own is bold.', 'user-message'),
+    'welcome_banner': (
+        'Welcome banner',
+        'Greet with "Welcome to Kimi Code Mods!" and give the logo its horns.',
+        'welcome-banner'),
     'fullscreen': (
         'Fullscreen renderer',
         'Draw Kimi in the alternate screen buffer, however it was started. '
@@ -801,7 +805,7 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
                                         'click_cursor', 'read_line_numbers',
                                         'expanded_by_default', 'read_limits',
                                         'auto_accept_plan', 'input_box_border',
-                                        'fullscreen']),
+                                        'fullscreen', 'welcome_banner']),
 }
 
 # tweakcc draws a two-state switch as a checkbox and everything else as its
