@@ -481,11 +481,22 @@ def run(cmd: list[str], root: Path, wait: bool = True) -> None:
 
     Either way the input queue is dropped: a command that ran for a minute has
     collected every key pressed at it, and the menu must not read them.
+
+    The screen is cleared first, so the command starts on a blank one. Without
+    that its output lands wherever the cursor happens to be — and since the
+    header's moon leaves it parked in line four, a patch run overwrote the
+    menu row by row instead of replacing it.
     """
+    m.clear_screen()
+    sys.stdout.flush()
     subprocess.run(cmd, cwd=str(root))
     drain_input()
     if wait:
         m.press_any()
+    elif hold:
+        # Long enough to read the summary the command printed, short enough
+        # that nobody waits on it: any key returns to the menu at once.
+        m.hold_for(hold)
 
 
 def open_file(path: Path) -> None:
@@ -493,6 +504,10 @@ def open_file(path: Path) -> None:
         print(f'not there: {path}')
         return
     editor = os.environ.get('VISUAL') or os.environ.get('EDITOR')
+    # Same reason as `run`: an editor taking over the terminal should find it
+    # empty rather than draw itself over half a menu.
+    m.clear_screen()
+    sys.stdout.flush()
     subprocess.run([editor, str(path)] if editor else ['open', str(path)])
 
 

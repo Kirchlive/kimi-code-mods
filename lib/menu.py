@@ -289,6 +289,18 @@ class Screen:
 # --------------------------------------------------------------------------
 
 
+def clear_screen() -> None:
+    """Blank the window and the scrollback behind it, cursor to the top.
+
+    `2J` clears what is on screen and `3J` the scrollback behind it. Without
+    the second one a menu taller than the window leaves its previous drawing
+    above the current one: scroll up and there are two headers, which looks
+    like the same screen drawn twice. It was not — the old one simply never
+    went anywhere.
+    """
+    sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+
+
 def title_case(text: str) -> str:
     """Every word capitalised, for the things a menu names rather than says.
 
@@ -514,7 +526,7 @@ def draw(screen: Screen, st, items: list[Item], cursor: int,
     # above the current one: scroll up and there are two headers, which is
     # what it looks like when the same screen has been drawn twice. It has
     # not — the old one simply never went anywhere.
-    sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+    clear_screen()
     if sys.stdout.isatty():
         sys.stdout.write(HIDE_CURSOR)
     row_map: dict[int, int] = {}
@@ -583,7 +595,7 @@ def field(title: str, value: str = '', hint: str = '', width: int = FIELD_WIDTH)
     inner = width - 2
     try:
         while True:
-            sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+            clear_screen()
             if color:
                 sys.stdout.write(HIDE_CURSOR)
             # Trimmed and padded by *columns*, not characters: an emoji is
@@ -804,7 +816,7 @@ def color(title: str, value: str = '#808080', hint: str = '', preview=None):
 
             body = beside(lines, list(preview(hex_now)) if preview else [],
                           terminal_width())
-            sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+            clear_screen()
             sys.stdout.write(HIDE_CURSOR if color_on else '')
             print('\n'.join(body))
             sys.stdout.flush()
@@ -1013,7 +1025,7 @@ def edit_row(screen: Screen, st, items: list[Item], cursor: int,
     text = start
     try:
         while True:
-            sys.stdout.write('\x1b[3J\x1b[2J\x1b[H')
+            clear_screen()
             if sys.stdout.isatty():
                 sys.stdout.write(HIDE_CURSOR)
             print('\n'.join(render(screen, st, items, cursor, None,
