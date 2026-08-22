@@ -9,5 +9,18 @@
 # For scripting, the individual commands remain the interface:
 #   ./kimi-patch.sh --status | --cost | --tools | --config-menu | --env | --migrate
 set -euo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolved through symlinks, because the installer puts one on PATH: without
+# this, `HERE` would be the directory the link sits in and `lib/` would be
+# looked for next to the link rather than next to the code. Walked in a loop
+# rather than with `realpath`, which is not on every macOS by default.
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *)  SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+HERE="$(cd "$(dirname "$SELF")" && pwd)"
 exec python3 "$HERE/lib/main-menu.py" "$@"
