@@ -57,16 +57,20 @@ SHOW_CURSOR = '\x1b[?25h'
 # afterwards, and this way what is being edited is legible in a screenshot.
 EDIT_CURSOR = '|'
 
-# tweakcc draws the row you are on in bold cyan and everything it says *about*
-# that row dimmed. The mark alone is one character wide and easy to lose on a
-# full screen, so the colour is what actually carries the selection.
-SELECTED = '\x1b[1;36m'
+# The red of the project's own banner, in 24-bit colour: rgb(234, 66, 66).
+# tweakcc draws the selected row in bold cyan, which is what this was until
+# the banner gave the project a colour of its own — and the mark alone is one
+# character wide and easy to lose on a full screen, so the colour is what
+# actually carries the selection. A terminal too old for 24-bit ignores the
+# sequence and draws the row bold, which still marks it.
+BRAND = '234;66;66'
+SELECTED = f'\x1b[1;38;2;{BRAND}m'
 DIM = '\x1b[2m'
 # The sentence explaining the selected row, in the selection's own colour but
 # not bold. Dimmed, it read as disabled text and was the first thing to get
 # lost on a dark terminal; tying it to the cyan says what it belongs to, and
 # dropping the bold keeps it from competing with the row itself.
-HELP = '\x1b[36m'
+HELP = f'\x1b[38;2;{BRAND}m'
 RESET = '\x1b[0m'
 
 

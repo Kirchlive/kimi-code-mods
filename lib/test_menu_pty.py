@@ -189,7 +189,10 @@ def main() -> int:
         # Colour is decided by the caller, and only `draw` turns it on. This
         # is the one place that proves the real path does: a self-check that
         # renders without a terminal can only prove the opposite.
-        check('the selected row is drawn in colour', '\x1b[1;36m' in s.buf)
+        # Compared against the constant, not a spelled-out escape: the brand
+        # colour changed once already, and a test that hard-codes it fails for
+        # the wrong reason the next time it does.
+        check('the selected row is drawn in colour', menu.SELECTED in s.buf)
 
         # Typing happens in the row, not on a screen of its own. An arrow key
         # pressed while typing must leave no trace in the value: read as a
