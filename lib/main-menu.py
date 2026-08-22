@@ -769,6 +769,11 @@ PATCH_HELP = {
     'user_message_style': (
         'Your message style',
         'How your own text is drawn. Kimi\'s own is bold.', 'user-message'),
+    'fullscreen': (
+        'Fullscreen renderer',
+        'Draw Kimi in the alternate screen buffer, however it was started. '
+        'The shell keeps its scrollback; Kimi\'s is gone when it exits.',
+        'fullscreen'),
     'input_box_border': (
         'Composer border',
         'The frame around the input box. off leaves the space blank.', 'input-box'),
@@ -795,7 +800,8 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
     'misc': ('Miscellaneous settings', ['suggestion_height', 'wd_command',
                                         'click_cursor', 'read_line_numbers',
                                         'expanded_by_default', 'read_limits',
-                                        'auto_accept_plan', 'input_box_border']),
+                                        'auto_accept_plan', 'input_box_border',
+                                        'fullscreen']),
 }
 
 # tweakcc draws a two-state switch as a checkbox and everything else as its
@@ -943,15 +949,6 @@ def screen_settings(st: State, group: str) -> m.Screen:
                              key='colors:border,borderFocus',
                              help='The frame the composer border setting draws '
                                   'is coloured by these two palette tokens.'))
-            rows.append(Item('cycle', 'Fullscreen renderer',
-                             lambda x: 'always' if env_value(
-                                 x.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1'
-                             else 'default',
-                             lambda x: '' if env_value(
-                                 x.root, 'KIMI_CODE_TUI_FULL_SCREEN') != '1'
-                             else 'applied by bin/kimi, no patch run',
-                             key='fullscreen', choices=['default', 'always'],
-                             help='Run Kimi in the alternate screen buffer.'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -1742,16 +1739,6 @@ def screen_patches(st: State) -> m.Screen:
 
 def cycle_item(st: State, item: Item, forward: bool) -> None:
     """Advance a cycle entry and persist it where that setting lives."""
-    if item.key == 'fullscreen':
-        env = str(HERE / 'kimi-env.sh')
-        now = env_value(st.root, 'KIMI_CODE_TUI_FULL_SCREEN') == '1'
-        if now:
-            subprocess.run(['bash', env, 'unset', 'KIMI_CODE_TUI_FULL_SCREEN'],
-                           capture_output=True)
-        else:
-            subprocess.run(['bash', env, 'set', 'KIMI_CODE_TUI_FULL_SCREEN', '1'],
-                           capture_output=True)
-        return
     ps.cycle(item.key, forward, st.settings_path)
 
 
@@ -1983,13 +1970,14 @@ def _selfcheck() -> int:
         rows_by_group = {g: screen_settings(st, g).build(st) for g in SETTING_GROUPS}
         for group, grows in rows_by_group.items():
             keys = SETTING_GROUPS[group][1]
-            # Two rows on the misc screen are not patch switches: the
-            # fullscreen renderer is a launcher variable and the permission
-            # mode is a config.toml key. Both moved here from the root menu,
-            # where they were rows that changed a value rather than doors.
+            # One row on the misc screen is not a patch switch: the permission
+            # mode is a config.toml key. It moved here from the root menu,
+            # where it was a row that changed a value rather than a door. The
+            # fullscreen renderer used to sit beside it as a launcher variable
+            # and is a patch switch now, so it counts like the rest.
             check(f'{group}: one row per switch',
                   [r.key for r in grows if r.selectable
-                   and r.key not in ('back', 'fullscreen', 'permission')
+                   and r.key not in ('back', 'permission')
                    and not r.key.startswith('colors:')] == keys,
                   [r.key for r in grows])
             check(f'{group}: every switch row carries help',

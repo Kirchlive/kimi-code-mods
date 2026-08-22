@@ -49,6 +49,10 @@ DEFAULTS = {
     'user_message_border': 'off',     # off | round | single | double | bold | topbottom
     'user_message_style': 'default',  # default | plain | italic | dim | underline | strikethrough
     'input_box_border': 'default',    # default | off | single | double | bold
+    # The alternate screen buffer. Kimi reads KIMI_CODE_TUI_FULL_SCREEN for
+    # this, which only reaches it when it is started through a launcher that
+    # exports the variable. As a patch it holds however Kimi is started.
+    'fullscreen': 'off',              # on | off
 }
 
 CHOICES = {
@@ -86,6 +90,7 @@ CHOICES = {
     'user_message_style': ['default', 'plain', 'italic', 'dim', 'underline',
                            'strikethrough'],
     'input_box_border': ['default', 'off', 'single', 'double', 'bold'],
+    'fullscreen': ['off', 'on'],
 }
 
 # Four settings take a value no list can hold: the message marker, your own
