@@ -12,6 +12,7 @@ prompts, defaults — and can always put it back.**
 [![macOS](https://img.shields.io/badge/macOS-supported-EA4242)](#requirements)
 [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-0.38.0-EA4242)](#version-compatibility)
 [![tests](https://img.shields.io/badge/tests-29%20passing-EA4242)](#tests)
+[![license](https://img.shields.io/badge/license-MIT-EA4242)](LICENSE)
 
 [Install](#install) · [What it changes](#what-it-changes) ·
 [Undo](#undo) · [How it works](#how-it-works) · [Internals](docs/internals.md)
@@ -41,13 +42,13 @@ command undoes all of it.
 **macOS, Linux, WSL**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/OWNER/kimi-code-mods/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/robliv/kimi-code-mods/main/install.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/OWNER/kimi-code-mods/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/robliv/kimi-code-mods/main/install.ps1 | iex
 ```
 
 <details>
@@ -58,7 +59,7 @@ goes on to modify an application you use. Download it first if that matters to
 you:
 
 ```sh
-curl -fsSL -o install.sh https://raw.githubusercontent.com/OWNER/kimi-code-mods/main/install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/robliv/kimi-code-mods/main/install.sh
 less install.sh
 bash install.sh
 ```
@@ -73,7 +74,7 @@ puts the repository in `~/.kimi-code-mods`, and links `kimi-code-mods` into
 <summary><b>From a checkout</b></summary>
 
 ```sh
-git clone https://github.com/OWNER/kimi-code-mods.git ~/.kimi-code-mods
+git clone https://github.com/robliv/kimi-code-mods.git ~/.kimi-code-mods
 ~/.kimi-code-mods/kimi-code-mods.sh
 ```
 
@@ -246,5 +247,4 @@ pointed at a different binary, with a different container to open.
 
 ## License
 
-Not chosen yet. Until a `LICENSE` file is added, default copyright applies and
-nobody but the author has permission to use, copy or redistribute this.
+MIT — see [LICENSE](LICENSE).

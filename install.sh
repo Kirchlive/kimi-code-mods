@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-line installer for kimi-code-mods.
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/kimi-code-mods/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/robliv/kimi-code-mods/main/install.sh | bash
 #
 # What it does, in order: check what is needed, fetch the repository into
 # ~/.kimi-code-mods, and put a `kimi-code-mods` command on PATH. It writes
@@ -19,7 +19,7 @@
 # from a local checkout instead of downloading.
 set -euo pipefail
 
-REPO="${KIMICODEMODS_REPO:-OWNER/kimi-code-mods}"
+REPO="${KIMICODEMODS_REPO:-robliv/kimi-code-mods}"
 BRANCH="${KIMICODEMODS_BRANCH:-main}"
 DEST="${KIMICODEMODS_DEST:-$HOME/.kimi-code-mods}"
 BINDIR="${KIMICODEMODS_BINDIR:-$HOME/.local/bin}"
@@ -68,9 +68,6 @@ elif [ -d "$DEST/.git" ]; then
     || die "could not fast-forward $DEST — it has local changes. Move it aside and re-run."
 else
   step "fetching $REPO into $DEST"
-  case "$REPO" in
-    OWNER/*) die "set KIMICODEMODS_REPO to the repository to install from, or KIMICODEMODS_SRC to a local checkout." ;;
-  esac
   [ -e "$DEST" ] && [ ! -d "$DEST/.git" ] \
     && die "$DEST exists and is not a git checkout. Move it aside and re-run."
   git clone --quiet --depth 1 --branch "$BRANCH" "https://github.com/$REPO.git" "$DEST"
