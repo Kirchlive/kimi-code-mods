@@ -40,36 +40,13 @@ command undoes all of it.
 </div>
 
 The header line is the state check: which Kimi is installed, whether this tool
-patched it, and how it is signed. Every row, and what it reaches:
-
-```
-❯ Themes                        Kimi's palette, or one of your own
-  Thinking Verbs                rotate a word beside the spinner
-  Thinking Style                the spinner while Kimi thinks, and how fast
-  Working Style                 the other spinner, while it waits on a tool
-  User Message Display          marker, frame and weight of what you typed
-  Misc                          ten switches with no group of their own
-  Toolsets                      named sets of disabled tools, one keystroke
-  Subagent Models               which model each subagent runs on
-  Complexity Effort Router      set reasoning effort per turn from the prompt
-  Tool Setup                    every tool ships in every request; drop what you never use
-  AGENTS.md Alternative Names   also read CLAUDE.md and friends
-  Skill Setup                   Kimi's own skills, and where more are read from
-  Hook Setup                    run a shell command on any of Kimi's 20 events
-  Loop Control                  attempts per step, context held back for the answer
-  Reasoning                     how hard it thinks, and whether thinking is re-sent
-  Transcript Window             how much history goes back each turn — the cost lever
-  Patches                       the JavaScript patches, and what each one did
-  Cost Report                   what every prompt weighs, and what edits saved
-  View System Prompts           read, price and migrate the 132 overrides
-  ────────────────────────────────────────────────────────────────────────────
-  Apply                         extract, patch, repack, re-sign, install
-  Restore Original Kimi Code    put the untouched binary back; settings survive
-  Open config.toml              Kimi's own settings file, in your editor
-  Open Env Profile              variables the launcher exports
-  Open Kimi Code's bundle.js    the extracted JavaScript, to search for anchors
-  Exit
-```
+patched it, and how it is signed. Everything above the divider is a setting —
+[What it changes](#what-it-changes) goes through them. Below it are the
+actions: **Apply** is the only row that reaches your Kimi at all,
+**Restore Original Kimi Code** puts it back, and the three **Open** rows drop
+you into Kimi's own `config.toml`, the `env-profile.conf` the launcher exports
+its variables from, or the extracted `bundle.js` when you want to search for an
+anchor yourself.
 
 **At a glance**
 
@@ -233,6 +210,8 @@ thinking spinner.
 132 system prompts are extracted out of the binary into `system-prompts/`. Edit
 one as plain Markdown and it replaces the original on the next run. A prompt
 whose anchor moved in a Kimi release is reported and skipped, never guessed at.
+**View System Prompts** reads them, prices them, and migrates your edits onto
+the new text after a Kimi update.
 
 **Cost report** — what every prompt weighs in tokens, so you can see what you
 are paying for before you trim it.
