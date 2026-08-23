@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="https://i.imgur.com/b5tyef7.jpeg" alt="Welcome to Kimi Code Mods!" width="880">
+<img src="assets/banner.jpeg" alt="Welcome to Kimi Code Mods!" width="880">
+
+# kimi-code-mods
 
 [![version](https://img.shields.io/badge/version-1.00.0-EA4242)](https://github.com/Kirchlive/kimi-code-mods/releases)
 [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-0.38.0-EA4242)](#version-compatibility)
@@ -17,8 +19,9 @@
 tool catalogue, transcript window, system prompts, hooks and defaults, plus the
 way it looks — and can always put it back.**
 
-[Install](#install) · [What it changes](#what-it-changes) ·
-[Undo](#undo) · [How it works](#how-it-works) · [Internals](docs/internals.md)
+[Requirements](#requirements) · [Install](#install) ·
+[What it changes](#what-it-changes) · [Undo](#undo) ·
+[How it works](#how-it-works) · [FAQ](#faq) · [Internals](docs/internals.md)
 
 </div>
 
@@ -58,6 +61,28 @@ command undoes all of it.
   Open Kimi Code's bundle.js    the extracted JavaScript, to search for anchors
   Exit
 ```
+
+**At a glance**
+
+| | |
+|---|---|
+| Verified against | Kimi Code **0.38.0** |
+| Patches | **17** JavaScript patches over **25** settings |
+| System prompts | **132**, extracted as Markdown |
+| Tests | **29** checks, about 950 assertions |
+| Patching | macOS only — the menu itself runs everywhere |
+| Undo | one command, from a frozen pristine baseline |
+
+## Requirements
+
+| | Patching (**Apply**) | Menu | |
+|---|---|---|---|
+| **macOS** | ✅ | ✅ | Reads the Mach-O header of Kimi's binary and re-signs with `codesign`. |
+| **Linux / WSL** | ❌ | ✅ | Apply refuses — the two steps above are macOS only. |
+| **Windows** | ❌ | via WSL | The PowerShell installer sets things up inside WSL, with the same limit. |
+
+Also needed: `python3` (menu), `node` (patch runner), `git`, and on macOS the
+Xcode command line tools for `codesign`.
 
 ## Install
 
@@ -111,26 +136,35 @@ kimi-code-mods
 Arrow keys move, `enter` opens, `‹›` change a value, `esc` goes back, `q`
 quits. Nothing is written to Kimi until you pick **Apply**.
 
-### Requirements
-
-| | |
-|---|---|
-| **macOS** | Everything. Patching reads the Mach-O header of Kimi's binary and re-signs with `codesign`. |
-| **Linux / WSL** | The menu runs, **Apply does not** — the two steps above are macOS only. |
-| **Windows** | Not natively. The PowerShell installer sets things up inside WSL, with the same limit. |
-
-Also needed: `python3` (menu), `node` (patch runner), `git`, and on macOS the
-Xcode command line tools for `codesign`.
-
 ## What it changes
 
 Every switch is on Kimi's own value until you change it. The menu writes to
 `patch-settings.conf` and `~/.kimi-code/config.toml`; **Apply** is what reaches
 the binary.
 
+### The three that move cost
+
+| Lever | What it does |
+|---|---|
+| **Transcript window** | How much history goes back with every turn. The one lever that moves running cost directly. |
+| **Tool setup** | Every tool description ships in every request, so an unused tool is a tax on each turn. Turn tools off individually and see what the catalogue weighs. |
+| **Reasoning** | How hard the model thinks, and whether thinking is re-sent with each turn. |
+
 ### Behaviour
 
-**Misc** — the switches belonging to no group of their own:
+| Group | What it does |
+|---|---|
+| **Complexity effort router** | `off` · `pin` · `free` — sets reasoning effort per turn from the prompt itself; `pin` only ever raises it, never lowers. |
+| **AGENTS.md alternative names** | `off` · `claude` · `all` — have Kimi also read `CLAUDE.md` and friends. `AGENTS.md` keeps priority, one file per directory. |
+| **Toolsets** | Named lists of disabled tools, applied in one keystroke, so a "minimal" and a "full" setup are one row apart. |
+| **Subagent models** | Which model each subagent runs on. Needs Kimi's secondary-model flag. |
+| **Skill setup** | Kimi's own product skills, and which directories skills are read from. |
+| **Hook setup** | Run a shell command on any of Kimi's 20 events. |
+| **Loop control** | Attempts per step, and how much context is held back for the answer. |
+| **Patches** | The JavaScript patches themselves: what each one is, whether it applied, and what it did to the bundle. |
+
+<details>
+<summary><b>Misc</b> — the ten switches belonging to no group of their own</summary>
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -145,38 +179,7 @@ the binary.
 | Fullscreen renderer | `off` `on` | The alternate screen buffer, patched into the binary so it holds however Kimi is started — not only through a launcher that exports an environment variable. |
 | Welcome banner | `off` `on` | Greet with *Welcome to Kimi Code Mods!* and give the logo its horns. |
 
-**Complexity effort router** — `off` · `pin` · `free`. Sets reasoning effort per
-turn from the prompt itself; `pin` only ever raises it, never lowers.
-
-**AGENTS.md alternative names** — `off` · `claude` · `all`. Have Kimi also read
-`CLAUDE.md` and friends. `AGENTS.md` keeps priority, one file per directory.
-
-**Tool setup** — every tool description ships in every request, so an unused
-tool is a tax on each turn. Turn tools off individually and see what the
-catalogue weighs.
-
-**Toolsets** — named lists of disabled tools, applied in one keystroke, so a
-"minimal" and a "full" setup are one row apart.
-
-**Subagent models** — which model each subagent runs on. Needs Kimi's
-secondary-model flag.
-
-**Skill setup** — Kimi's own product skills, and which directories skills are
-read from.
-
-**Hook setup** — run a shell command on any of Kimi's 20 events.
-
-**Loop control** — attempts per step, and how much context is held back for the
-answer.
-
-**Reasoning** — how hard the model thinks, and whether thinking is re-sent with
-each turn.
-
-**Transcript window** — how much history goes back with every turn. The one
-lever that moves running cost directly.
-
-**Patches** — the JavaScript patches themselves: what each one is, whether it
-applied, and what it did to the bundle.
+</details>
 
 ### Look
 
@@ -184,7 +187,14 @@ applied, and what it did to the bundle.
 of a session, and two presets that cannot be deleted: `Kimi-Code-Mods` (Kimi's
 dark palette with the project red) and `Default Kimi`.
 
-**Thinking style** — the spinner while Kimi thinks and composes:
+**Two spinners, settable apart** — the one turning while Kimi *thinks*, and the
+one turning while it *waits* on the model or a tool. Kimi keeps two alphabets
+and used to change both at once; here they are separate.
+
+<details>
+<summary><b>Spinners, verbs and message display</b> — every value</summary>
+
+**Thinking style / Working style**
 
 | Setting | Values |
 |---|---|
@@ -193,21 +203,21 @@ dark palette with the project red) and `Default Kimi`.
 | Your own frames | any characters, space separated |
 | Reverse-mirror run | `off` `on` — run the frames there and back, so it swings instead of jumping |
 
-**Working style** — the *other* spinner, the one turning while Kimi waits on the
-model or a tool. Kimi keeps two alphabets and used to change both at once; this
-is the second, settable on its own. Same presets plus `follow`, which keeps it
-equal to the thinking spinner.
+Working style takes the same presets plus `follow`, which keeps it equal to the
+thinking spinner.
 
 **Thinking verbs** — rotate a word beside the spinner instead of always saying
 "working": on or off, your own word list, and the format they are drawn in.
 
-**User message display** — how your own messages appear in the transcript:
+**User message display**
 
 | Setting | Values |
 |---|---|
 | Your message marker | any prefix; Kimi's own is a sparkle |
 | Your message border | `off` `round` `single` `double` `bold` `topbottom` |
 | Your message style | `default` `plain` `italic` `dim` `underline` `strikethrough` |
+
+</details>
 
 ### Prompts
 
@@ -240,6 +250,14 @@ rm ~/.local/bin/kimi-code-mods
 rm -rf ~/.kimi-code-mods        # settings, baseline and patches live here
 ```
 
+## What this costs you
+
+> [!IMPORTANT]
+> Re-signing is **ad-hoc**: the hardened runtime and Apple's notarisation are
+> gone from the patched binary. That is inherent to modifying a signed
+> application, not a shortcut taken here. If your setup requires a notarised
+> Kimi, restore the baseline.
+
 ## How it works
 
 Kimi Code is a Node single-executable application: a JavaScript bundle packed
@@ -247,7 +265,7 @@ into a Mach-O binary. A run is five steps, and stops at the first one that
 fails without touching what is installed.
 
 1. **Freeze** an untouched copy under `baseline/`, once per Kimi version.
-2. **Extract** the ~23 MB bundle out of the baseline.
+2. **Extract** the ~22 MB bundle out of the baseline.
 3. **Apply** your prompt overrides, then the patches in `patches/`. Each patch
    locates its anchor and refuses to act if the anchor is missing or ambiguous.
 4. **Repack** the bundle and re-sign ad-hoc with `codesign`.
@@ -260,24 +278,32 @@ left behind:
 ```
  Apply summary
 
-   patches   11 applied, 5 no-op, 0 failed
-   prompts   0 applied, 61 unchanged, 8 anchor missing, 0 rejected
+   patches   12 applied, 5 no-op, 0 failed
+   prompts   0 applied, 132 unchanged, 0 drifted, 0 anchor missing, 0 rejected
    binary    repacked, re-signed ad-hoc, verified 0.38.0
 
    result    OK — Kimi Code 0.38.0 is patched and installed
 ```
 
+Five of the seventeen patches are no-ops on this build: the setting they own is
+still on Kimi's own value, so there is nothing to splice in. Turn one on and it
+moves to *applied*.
+
 Writing your own patch, the anchor rules, and how prompt extraction works are
 in [docs/internals.md](docs/internals.md).
 
-### What this costs you
+## Version compatibility
 
-Re-signing is **ad-hoc**: the hardened runtime and Apple's notarisation are
-gone from the patched binary. That is inherent to modifying a signed
-application, not a shortcut taken here. If your setup requires a notarised
-Kimi, restore the baseline.
+Verified against **Kimi Code 0.38.0**: all 17 patches and all 132 prompt
+overrides find their anchor in this build.
 
-### Surviving a Kimi update
+Patches anchor on text inside a minified bundle, and that text moves between
+releases. When an anchor is gone the patch reports it and is skipped — the run
+carries on with the rest, and nothing half-applied is installed. Prompt
+overrides work the same way: a prompt whose text Kimi rewrote is reported as
+*anchor missing* on every run and left alone, rather than forced over the new
+wording. `kimi-patch.sh --extract-prompts` pulls the new text out of the
+updated binary, and `--migrate` three-way-merges your edits onto it.
 
 Kimi replaces its own binary when it auto-updates, which removes every patch.
 Your settings are untouched — run **Apply** again and they come back. To stop
@@ -290,20 +316,67 @@ export KIMI_CLI_NO_AUTO_UPDATE=1
 The menu notices when the installed binary is no longer the one it patched and
 says so in its header.
 
-## Version compatibility
+## FAQ
 
-Verified against **Kimi Code 0.38.0**.
+<details>
+<summary><b>Kimi dies at startup with no message (exit 137).</b></summary>
 
-Patches anchor on text inside a minified bundle, and that text moves between
-releases. When an anchor is gone the patch reports it and is skipped — the run
-carries on with the rest, and nothing half-applied is installed. Prompt
-overrides work the same way: 8 of 69 currently have no anchor in 0.38.0,
-because Kimi moved that text, and are reported on every run.
+macOS sends `SIGKILL` to a signed binary whose signature no longer matches its
+contents. Every run re-signs ad-hoc for exactly this reason; if the binary was
+edited by other means, restore the baseline and start again.
+
+</details>
+
+<details>
+<summary><b>The menu runs but <i>Apply</i> refuses.</b></summary>
+
+You are on Linux or WSL. Patching reads a Mach-O header and re-signs with
+`codesign` — both macOS only. Everything else in the menu works.
+
+</details>
+
+<details>
+<summary><b>Kimi updated itself and everything is stock again.</b></summary>
+
+Expected: the update replaced the binary. Your settings survive — run **Apply**
+again, or set `KIMI_CLI_NO_AUTO_UPDATE=1` to stop the updates.
+
+</details>
+
+<details>
+<summary><b>A prompt reports "anchor missing".</b></summary>
+
+Kimi moved that text in a release, so the override is skipped rather than
+forced over the new wording. Nothing is lost. Re-extract with
+`kimi-patch.sh --extract-prompts` and carry your change across with
+`--migrate`, which does the three-way merge for you. See
+[docs/internals.md](docs/internals.md).
+
+</details>
+
+<details>
+<summary><b>Is it safe to run on the Kimi I use every day?</b></summary>
+
+The patched build is verified before it is installed and rolled back if it does
+not run, and the pristine binary is kept per version and never deleted. What
+you do give up is notarisation — see
+[What this costs you](#what-this-costs-you).
+
+</details>
+
+<details>
+<summary><b>Can I write my own patch?</b></summary>
+
+Yes — drop a `.js` file into `patches/`. The anchor rules, the runner contract
+and the test harness are in [docs/internals.md](docs/internals.md).
+
+</details>
 
 ## Tests
 
 ```sh
-./test.sh
+./test.sh          # unit checks, a few seconds
+./test.sh --full   # adds the real binary: Mach-O resize, signing, round-trip
 ```
 
 29 checks: the patch runner's contract, the auto-repatch guard, the launcher,

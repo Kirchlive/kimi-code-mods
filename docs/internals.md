@@ -1,7 +1,7 @@
-# kimi-code-mods
+# Internals
 
-Local patches for the Kimi Code binary — the same idea as tweakcc, adapted to a
-different container.
+How `kimi-code-mods` opens the Kimi Code binary, where the anchors are, and how
+to write a patch of your own.
 
 ```
 ./kimi-patch.sh                    # patch from the pristine baseline
@@ -22,8 +22,8 @@ final prompt text.
 Kimi Code is a **Node.js Single Executable Application**, not a Bun standalone.
 The Mach-O carries a `NODE_SEA` segment holding one section,
 `__NODE_SEA_BLOB`, which contains the build path followed by the entire bundle
-as **plain UTF-8 JavaScript** — no snapshot, no bytecode cache. On 0.36.0 that
-is 22 MB of minified source inside a 57.6 MB segment.
+as **plain UTF-8 JavaScript** — no snapshot, no bytecode cache. On 0.38.0 that
+is 22 MB of minified source inside a 56.5 MB segment.
 
 That makes it easier to reach than Claude Code's Bun bundle, where the
 entrypoint has to be resolved through a module directory by name. There is no
@@ -74,7 +74,7 @@ menu builds its rows from that table, so a switch is offered the moment it is
 registered, and a switch that exists only in the patch is invisible.
 
 To find anchors, run `--extract` and search `.work/bundle.js`. Useful entry
-points on 0.36.0: `systemPrompt` (207 hits), `<system-reminder>` (17 hits),
+points on 0.38.0: `systemPrompt` (207 hits), `<system-reminder>` (10 hits),
 `You are Kimi`.
 
 Three traps, all of which cost real time here. Minified identifiers contain
@@ -331,20 +331,20 @@ var init_system$1 = __esmMin((() => { system_default$1 = `You are …`; }));
 
 So they can be recovered as their real source files rather than guessed at by
 shape. `system-prompts/` mirrors the upstream directory layout; each file keeps
-a header with source path, module name and bundle offset. On 0.36.0 that is
-**117 files, 292k characters**:
+a header with source path, module name and bundle offset. On 0.38.0 that is
+**132 files, 306k characters**:
 
 | | files | chars |
 |---|---|---|
-| skills | 18 | 114k |
-| tool descriptions | 57 | 96k |
-| agent profiles + system prompt | 10 | 50k |
-| other agent-core prompts | 21 | 26k |
-| inline constants | 11 | 6k |
+| skills | 19 | 114k |
+| tool descriptions | 68 | 102k |
+| agent profiles + system prompt | 9 | 30k |
+| other agent-core prompts | 24 | 53k |
+| inline constants | 12 | 6k |
 
 Two things to know when reading them. Kimi ships **two engine generations side
 by side** — `packages/agent-core` (48 files) and `packages/agent-core-v2`
-(58) — so most prompts appear twice, and only the ones the running profile
+(72) — so most prompts appear twice, and only the ones the running profile
 loads are live. And placeholders come in two flavours: `{{ VAR }}` in the
 mustache variant, `${VAR}` in the template variant. The filename records which.
 
@@ -392,7 +392,7 @@ must be a single left-to-right pass — replacing sequences one after another
 turns `\\r` in Kimi's own Edit tool description into a carriage return, which
 is exactly the bug that showed up when the round-trip was first verified.
 
-The round-trip is verified, not assumed: extracting all 117 prompts and writing
+The round-trip is verified, not assumed: extracting all 132 prompts and writing
 them straight back produces a bundle byte-identical to the original.
 
 ## What the prompts cost
@@ -413,11 +413,13 @@ written at extraction time, so the numbers stay correct after patching.
 Token figures are estimates at 3.7 characters per token — use them to compare
 prompts against each other, not as a billing statement.
 
-**Half of the 79k tokens is dead weight.** The binary carries both engine
-generations; only the one the running profile loads is ever sent. On 0.36.0
-that is **v2** (`packages/agent-core-v2`), established by patching a distinct
+**Nearly half of the 83k tokens is dead weight.** The binary carries both engine
+generations — 37.5k tokens in `agent-core`, 43.5k in `agent-core-v2` — and only
+the one the running profile loads is ever sent. That is **v2**
+(`packages/agent-core-v2`), established on 0.36.0 by patching a distinct
 codeword into each generation's `system` prompt and asking Kimi which one it
-sees. `packages/agent-core` is inert — do not spend effort trimming it.
+sees, and not re-measured since. `packages/agent-core` is inert — do not spend
+effort trimming it.
 
 ## Trimming the tool catalogue
 
@@ -563,7 +565,7 @@ stands in for the binary wherever a real Mach-O is not required. Your
 `baseline/`, `patches/` and `system-prompts/` are never touched.
 
 `--full` additionally runs `lib/sea.py selfcheck`, which round-trips the
-payload through identity, shrink and grow, and verifies that extracting all 117
+payload through identity, shrink and grow, and verifies that extracting all 132
 prompts and re-applying them reproduces the bundle byte for byte.
 
 ### Mouse
