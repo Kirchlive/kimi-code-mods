@@ -35,7 +35,7 @@ command undoes all of it.
 
 <div align="center">
 
-<img src="assets/menu.png" alt="The kimi-code-mods menu running in a terminal: a header reading 'Kimi 0.38.0 — patched by kimi-code-mods, ad-hoc signature', the row list with Themes selected in the project red, and the action block with Apply and Restore below a divider" width="880">
+<img src="assets/demo.gif" alt="The menu opening on Kimi 0.38.0, the thinking spinner being stepped through its presets, the transcript window opened, and Apply running: seventeen patches listed one by one, the bundle repacked and re-signed, and a summary reading 12 applied, 5 no-op, 0 failed" width="880">
 
 </div>
 
