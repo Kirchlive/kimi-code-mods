@@ -6,6 +6,12 @@
 # release rather than keeping an old recording: the menu's rows and the version
 # in the header are both part of the picture.
 #
+# Every pause here waits for something to appear on screen rather than for a
+# number of seconds. A fixed sleep is a guess about how fast the machine is,
+# and when the guess is short the keystrokes land in the shell instead of the
+# menu and draw themselves as ^[[B across the top of the film. Waiting on the
+# screen also means this tape does not need re-timing on faster hardware.
+#
 # The demo steps a value forward and then back again, so it ends on the setting
 # it started on and leaves patch-settings.conf untouched. Keep it that way —
 # a tape that edits your settings as a side effect cannot be re-run safely.
@@ -48,31 +54,41 @@ Show
 Type "kimi-code-mods"
 Sleep 600ms
 Enter
-Sleep 2.5s
+
+# The menu takes a few seconds to come up. Wait for the last row of the list,
+# which means the whole thing is drawn and the terminal is in raw mode — not
+# for a guessed number of seconds.
+Wait+Screen@60s /View System Prompts/
+Sleep 1.5s
 
 # Thinking Style — the row that explains itself, with the preview running.
 Down@350ms 2
 Sleep 800ms
 Enter
-Sleep 1.5s
+Wait+Screen@30s /Reverse-Mirror Run/
+Sleep 1s
 Right@700ms 3
 Sleep 1.2s
 Left@400ms 3
 Sleep 600ms
 Escape
+Wait+Screen@30s /View System Prompts/
 Sleep 800ms
 
-# Transcript Window — the one lever that moves running cost.
+# Transcript Window — the one lever that moves running cost. Its settings are
+# launcher variables, so it opens the environment screen.
 # 15 - 2 = 13 rows down from Thinking Style.
 Down@350ms 13
 Sleep 800ms
 Enter
-Sleep 1.5s
+Wait+Screen@30s /Launcher Environment/
+Sleep 1s
 Right@700ms 2
 Sleep 1.2s
 Left@400ms 2
 Sleep 600ms
 Escape
+Wait+Screen@30s /View System Prompts/
 Sleep 1s
 
 # Apply — 19 - 15 = 4 rows down from Transcript Window.
@@ -80,16 +96,12 @@ Down@250ms 4
 Sleep 800ms
 Enter
 
-# A full run takes about 57 seconds on this machine — longer than the GIF
-# should be. Drop out of the recording while it works and come back for the
-# last few seconds of it, so the summary is seen arriving rather than pasted in.
-#
-# The menu holds that summary for five seconds and then redraws itself, so the
-# window is narrow: too early and the film is all progress output, too late and
-# the menu is already back. Measure your own run once — `time ./kimi-patch.sh`
-# — and set the sleep below to about ten seconds less than it took. Those eight
-# lines are the claim the whole README rests on; they are what the film is for.
+# A full run takes around a minute, which is longer than the GIF should be, so
+# drop out of the recording while it works and come back when the summary is
+# on screen. The menu holds that summary for five seconds before redrawing
+# itself, and those eight lines are the claim the whole README rests on — they
+# are what the film is for.
 Hide
-Sleep 48s
+Wait+Screen@300s /Apply summary/
 Show
-Sleep 17s
+Sleep 6s
