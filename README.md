@@ -33,6 +33,15 @@ binary, applies the changes you picked in a menu, and puts it back together —
 starting from a pristine copy every time, so nothing accumulates and one
 command undoes all of it.
 
+<div align="center">
+
+<img src="assets/menu.png" alt="The kimi-code-mods menu running in a terminal: a header reading 'Kimi 0.38.0 — patched by kimi-code-mods, ad-hoc signature', the row list with Themes selected in the project red, and the action block with Apply and Restore below a divider" width="880">
+
+</div>
+
+The header line is the state check: which Kimi is installed, whether this tool
+patched it, and how it is signed. Every row, and what it reaches:
+
 ```
 ❯ Themes                        Kimi's palette, or one of your own
   Thinking Verbs                rotate a word beside the spinner
