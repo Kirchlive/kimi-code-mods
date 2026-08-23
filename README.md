@@ -35,7 +35,7 @@ command undoes all of it.
 
 <div align="center">
 
-<img src="assets/demo.gif" alt="The menu opening on Kimi 0.38.0, the thinking spinner being stepped through its presets, the transcript window opened, and Apply running: seventeen patches listed one by one, the bundle repacked and re-signed, and a summary reading 12 applied, 5 no-op, 0 failed" width="880">
+<img src="assets/demo.gif" alt="The menu opening on Kimi 0.38.0, the thinking spinner stepped through its presets, the ten Misc switches with the composer border cycling, the transcript window opened on the launcher variables behind it, and Apply running: seventeen patches listed one by one, the bundle repacked and re-signed, and a summary reading 12 applied, 5 no-op, 0 failed" width="880">
 
 </div>
 

@@ -6,6 +6,11 @@
 # release rather than keeping an old recording: the menu's rows and the version
 # in the header are both part of the picture.
 #
+# If a render is interrupted, delete the `vhs*` directories it leaves in
+# `$TMPDIR` before running again. A stale one does not fail loudly — the next
+# render simply drops most of its frames and produces a film that runs a third
+# of the length with the end missing, which is easy to mistake for a bad tape.
+#
 # Every pause here waits for something to appear on screen rather than for a
 # number of seconds. A fixed sleep is a guess about how fast the machine is,
 # and when the guess is short the keystrokes land in the shell instead of the
@@ -75,10 +80,30 @@ Escape
 Wait+Screen@30s /View System Prompts/
 Sleep 800ms
 
+# Misc — the ten switches that have no group of their own, which is the screen
+# that shows how much of Kimi turns out to be settable at all. Composer border
+# is the seventh row down and cycles through five frames, so it reads at a
+# glance in a way an on/off switch does not.
+# 5 - 2 = 3 rows down from Thinking Style.
+Down@350ms 3
+Sleep 800ms
+Enter
+Wait+Screen@30s /Miscellaneous Settings/
+Sleep 1.5s
+Down@300ms 7
+Sleep 700ms
+Right@700ms 2
+Sleep 1.2s
+Left@400ms 2
+Sleep 600ms
+Escape
+Wait+Screen@30s /View System Prompts/
+Sleep 800ms
+
 # Transcript Window — the one lever that moves running cost. Its settings are
 # launcher variables, so it opens the environment screen.
-# 15 - 2 = 13 rows down from Thinking Style.
-Down@350ms 13
+# 15 - 5 = 10 rows down from Misc.
+Down@350ms 10
 Sleep 800ms
 Enter
 Wait+Screen@30s /Launcher Environment/
