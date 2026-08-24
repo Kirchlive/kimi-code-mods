@@ -54,6 +54,7 @@ DEFAULTS = {
     # exports the variable. As a patch it holds however Kimi is started.
     'fullscreen': 'off',              # on | off
     'welcome_banner': 'on',           # on | off — the greeting and the horns
+    'cron_drop_dir': 'off',           # on | off — adopt <sessionDir>/cron/*.json drops
 }
 
 CHOICES = {
@@ -93,6 +94,7 @@ CHOICES = {
     'input_box_border': ['default', 'off', 'single', 'double', 'bold'],
     'fullscreen': ['off', 'on'],
     'welcome_banner': ['off', 'on'],
+    'cron_drop_dir': ['off', 'on'],
 }
 
 # Four settings take a value no list can hold: the message marker, your own

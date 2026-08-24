@@ -781,6 +781,11 @@ PATCH_HELP = {
     'input_box_border': (
         'Composer border',
         'The frame around the input box. off leaves the space blank.', 'input-box'),
+    'cron_drop_dir': (
+        'Cron drop directory',
+        'Fire JSON files dropped into <sessionDir>/cron/ as one-shot cron '
+        'turns. For an external bus daemon; nothing typed reaches the session.',
+        'cron-drop'),
 }
 
 
@@ -805,7 +810,8 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
                                         'click_cursor', 'read_line_numbers',
                                         'expanded_by_default', 'read_limits',
                                         'auto_accept_plan', 'input_box_border',
-                                        'fullscreen', 'welcome_banner']),
+                                        'fullscreen', 'welcome_banner',
+                                        'cron_drop_dir']),
 }
 
 # tweakcc draws a two-state switch as a checkbox and everything else as its
