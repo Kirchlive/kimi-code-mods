@@ -210,3 +210,120 @@ mehr, und Swarm-Members terminieren immer über das Batch.
    Suite-Konvention abwich.
 8. **Installations-Nachweis schlägt Selbstauskunft**: `--verify` wendet jeden
    Patch erneut an; was sauber durchliefe, war nie drin.
+
+---
+
+## Fortsetzung: Verifikationsrunde nach Fix-Einbau (gleiche Session, später)
+
+Nach dem Einbau des Sweep-Fixes und zwei weiteren 403-gestorbenen Test-Swarms
+die Frage: hätte der Guard (Fix v1) greifen müssen — und greift der Sweep-Fix
+(Fix v2) an der richtigen Stelle? Diese Runde prüft das ohne einen einzigen
+Modell-Call.
+
+### Analyse
+
+1. Call:
+   ```
+   Bash: Backup-Snapshot — git archive HEAD + gitignored Lokaldaten
+   (FINDINGS*, state.json, Settings) + beide Binaries (baseline, patched)
+   nach ~/.kimi-code-mods-backup-<stamp>/
+   ```
+   Ausgabe: 351 MB, 22 Patches, beide Binaries, alle lokalen Notizen.
+   Nutzung: Rückbau-Option sichern, bevor weiter analysiert wird — der Vorschlag
+   "alte 0.38er-Version wiederherstellen" wurde damit obsolet, ohne etwas zu
+   riskieren.
+
+2. Call:
+   ```
+   Bash: python3 — Member-Wires agent-27..30 zeilenweise: pro Zeile Typ und
+   Zeitstempel, relativ zu tool.call und turn.ended der Main-Wire (Konstanten
+   aus der ersten Runde)
+   ```
+   Ausgabe: Setup-Kette (binding → profile → permission → turn.prompt) endet
+   −94 bis −271 ms **vor** `turn.ended`; `llm.request` startet ebenfalls davor;
+   die Members sterben +830 bis +926 ms **danach** (403).
+   Nutzung: Widerlegt die Arbeitsannahme aus der ersten Runde ("spawned-Events
+   kommen erst nach dem Sweep") — das Spawn awaitet zwar, ist aber längst fertig,
+   bevor der Turn endet. Der Sweep hätte Records vorgefunden, und der v1-Guard
+   hätte greifen müssen. Die Placeholder kommen also nicht (nur) aus dem Sweep.
+
+3. Call:
+   ```
+   Read .work/bundle.js:525050 (handleBackgroundTaskEvent)
+   ```
+   Ausgabe: `backgroundTasks.set(info.taskId, info)` — der Handler schreibt das
+   `info` aus `background.task.started` ungefiltert in dieselbe Map, die der
+   Guard liest.
+   Nutzung: Belegt die Task-Seite des Guards: `parentToolCallId` aus
+   `KmodsSwarmTask.toInfo` landet in der Map — sobald das Event läuft.
+
+4. Call:
+   ```
+   Read .work/bundle.js:122872 (registerTask)
+   ```
+   Ausgabe: `detached: true` → `this.tasks.set(...)`, `runTaskLifecycle(entry)`,
+   dann synchron `emitTaskStarted(this.toInfo(entry))`.
+   Nutzung: Das Task-Started-Event feuert synchron bei der Registrierung —
+   7 ms nach dem Tool-Call, lange vor dem Sweep. Map und Record lagen beide vor;
+   der Guard hatte alles, was er braucht — und griff trotzdem nicht.
+
+5. Call:
+   ```
+   Read .work/bundle.js:282951 (emitAgentRunSpawned)
+   ```
+   Ausgabe: dispatcht `SubagentSpawned` über `IEventDispatcher` des Requesters,
+   mit echtem `subagentName: meta.profileName`, `parentToolCallId`, `model`,
+   `thinkingEffort`; dazu Telemetrie über denselben Accessor.
+   Nutzung: Belegt, dass das Event die richtigen Felder trägt — wenn es ankäme,
+   gäbe es keine Placeholder-Namen. Der Fehler sitzt also im Transport, nicht im
+   Inhalt.
+
+6. Call:
+   ```
+   Read .work/bundle.js:524275 (session.onEvent-Subscription) und
+   524320 (handleEvent-Switch)
+   ```
+   Ausgabe: Der SessionEventHandler abonniert `session.onEvent` einmal pro
+   Session-Bindung; der Switch routet `subagent.spawned` u.a. an
+   `handleLifecycleEvent` — ohne Turn-Prüfung.
+   Nutzung: Kein Turn-Filter auf dieser Ebene. Die Suche verengt sich auf die
+   Brücke Dispatcher → Session-Stream.
+
+7. Call:
+   ```
+   Grep "\.observable" .work/bundle.js → Read 258020–258032
+   ```
+   Ausgabe: die Dispatch-Pipeline persistiert `durable` Events in die Wire und
+   publiziert `observable` Events auf den EventBus — `if (cls.observable &&
+   !this.disposed)`. `SubagentSpawned` ist `observable`, nicht `durable`.
+   Nutzung: Erklärt das Wire-Schweigen aus Runde 1 vollständig (kein Bug, keine
+   Isolation — schlicht nicht durable), und benennt die einzige Gate-Bedingung
+   der Brücke: `disposed`. Der Main-Agent wird zwischen Turns nicht disposed —
+   statisch bleibt damit kein Filter übrig, der die Events verschluckt.
+
+### Ergebnis der Fortsetzung
+
+Die Statik widerspricht dem beobachteten Symptom: Records, Task-Map und
+Event-Felder lagen alle rechtzeitig vor, und kein Turn-Gate existiert. Damit
+sind zwei Lesarten übrig:
+
+- Das Verschwinden geschah nicht im Sweep (`turn.ended`), sondern im
+  **Notification-Turn** 1–2 s später (`task.terminated` → neuer Turn →
+  `resetRuntimeState`) — das Timing des User-Reports ("ca. 1–2 Sekunden")
+  passt dazu besser als zum Sweep (0,3 s).
+- Oder zwischen Bus-Publish und Store-Eintrag sitzt eine Schicht, die nur zur
+  Laufzeit sichtbar wird.
+
+Beide sind mit Statik nicht mehr unterscheidbar — die nächste Information muss
+aus der Beobachtung kommen: verschwinden die Zeilen sofort oder erst nach
+1–2 s? Genau dafür war die Unterscheidung dieser Runde da.
+
+### Zusatz-Prinzipien
+
+9. **Ein Widerspruch zwischen Statik und Symptom ist ein Fund, kein
+   Misserfolg**: Er grenzt die verbleibenden Ursachen auf die ein, die man
+   nicht lesen kann — und sagt einem, welche Beobachtung als Nächstes fehlt.
+10. **Zeitangaben im User-Report sind Testdaten**: "1–2 Sekunden" reichte, um
+    den Sweep (0,3 s) vom Notification-Turn (1,3 s) zu trennen — zwei
+    Kandidaten, eine Zahl, eine Frage an den User statt ein weiterer Bundle-
+    Tauchgang.
