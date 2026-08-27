@@ -39,11 +39,24 @@
 // usable. Set `agent_background = default` to hand the decision back to the
 // model.
 //
+// IMMEDIATE MODE
+// `always` still lets the model continue the turn after dispatching — the
+// loop calls it once more, and it can read a file or answer a question while
+// the agent works. `immediate` sets `stopTurn: true` on the tool result, so
+// the turn ends the moment the agent is dispatched. The model cannot add
+// another tool call or a closing sentence — the dispatch IS the turn.
+//
+// That is the stricter guarantee: no continuation means no chance of the
+// model deciding to wait, poll, or "just check one more thing." The cost is
+// that a response that would have dispatched an agent AND done something
+// else in the same turn now does only the dispatch.
+//
 // ------------------------------------------------------------------ settings
 //
 // `agent_background` in patch-settings.conf:
-//   default  the model decides, guided by the tool description
-//   always   every subagent that can run detached does
+//   default    the model decides, guided by the tool description
+//   always     every subagent that can run detached does
+//   immediate  like always, and the turn ends at dispatch
 //
 // `agent_dock` forces `always` while it is on, and the menu will not let the
 // row be changed then. The dock exists to show what is running beside a
@@ -54,40 +67,66 @@
 
 const DOCK = String(settings.get('agent_dock', 'off')).toLowerCase();
 const CHOSEN = String(settings.get('agent_background', 'default')).toLowerCase();
-const ALLOWED = ['default', 'always'];
+const ALLOWED = ['default', 'always', 'immediate'];
 
 if (!ALLOWED.includes(CHOSEN)) {
   throw new Error(`agent_background must be one of ${ALLOWED.join(', ')} - got "${CHOSEN}"`);
 }
 
-const MODE = DOCK === 'off' ? CHOSEN : 'always';
+const MODE = DOCK === 'off' ? CHOSEN : (CHOSEN === 'immediate' ? 'immediate' : 'always');
 
 if (MODE === 'default') {
   throw new Error('already patched');
 }
 
-const ANCHOR =
-  '\t\tasync resolveExecution(args) {\n' +
-  '\t\t\tconst requestedProfileName = args.subagent_type?.length ? args.subagent_type : void 0;';
+let out = js;
 
-const REPLACEMENT =
+function splice(label, anchor, replacement) {
+  if (out.includes(replacement)) {
+    return;
+  }
+  const n = out.split(anchor).length - 1;
+  if (n === 0) {
+    throw new Error(`${label} not found - the shape changed this release`);
+  }
+  if (n !== 1) {
+    throw new Error(`${label} is not unique (${n}) - refusing to guess`);
+  }
+  out = out.replace(anchor, () => replacement);
+}
+
+// ------------------------------------------------------------- 1. the flag
+splice('the subagent tool\'s execution resolution',
+  '\t\tasync resolveExecution(args) {\n' +
+  '\t\t\tconst requestedProfileName = args.subagent_type?.length ? args.subagent_type : void 0;',
   '\t\tasync resolveExecution(args) {\n' +
   '\t\t\tif (args.run_in_background !== true && this.canRunInBackground()) args = {\n' +
   '\t\t\t\t...args,\n' +
   '\t\t\t\trun_in_background: true\n' +
   '\t\t\t};\n' +
-  '\t\t\tconst requestedProfileName = args.subagent_type?.length ? args.subagent_type : void 0;';
+  '\t\t\tconst requestedProfileName = args.subagent_type?.length ? args.subagent_type : void 0;');
 
-if (js.includes(REPLACEMENT)) {
-  throw new Error('already patched');
+// ------------------------------------------------------------- 2. stopTurn
+if (MODE === 'immediate') {
+  // v1 (agent-core) uses `this.allowBackground`; v2 (agent-core-v2) uses
+  // `allowBackground, false` and `allowBackground, true`. All four return
+  // sites get the same stopTurn flag.
+  const pairs = [
+    ['formatBackgroundAgentResult$1(taskId, handle, args.description, this.allowBackground)',
+     'formatBackgroundAgentResult$1(taskId, handle, args.description, this.allowBackground)'],
+    ['formatBackgroundAgentResult(taskId, handle, args.description, allowBackground, false)',
+     'formatBackgroundAgentResult(taskId, handle, args.description, allowBackground, false)'],
+    ['formatBackgroundAgentResult(taskId, handle, args.description, allowBackground, true)',
+     'formatBackgroundAgentResult(taskId, handle, args.description, allowBackground, true)'],
+  ];
+  for (const [call] of pairs) {
+    const anchor = `return { output: ${call} };`;
+    const replacement = `return { output: ${call}, stopTurn: true };`;
+    if (out.includes(replacement)) continue;
+    if (out.includes(anchor)) {
+      out = out.replace(anchor, () => replacement);
+    }
+  }
 }
 
-const n = js.split(ANCHOR).length - 1;
-if (n === 0) {
-  throw new Error('the subagent tool does not resolve its execution this way any more');
-}
-if (n !== 1) {
-  throw new Error(`the subagent tool's execution resolution is not unique (${n}) - refusing to guess`);
-}
-
-return js.replace(ANCHOR, () => REPLACEMENT);
+return out;

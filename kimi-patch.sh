@@ -267,6 +267,16 @@ esac
 # Establish the baseline. Never freeze an ad-hoc-signed binary: that is one of
 # ours and would bake existing patches into the "pristine" copy forever.
 mkdir -p "$BASELINE_DIR" "$PATCH_DIR" "$WORK"
+
+# From here everything goes to the terminal AND to $WORK/last-apply.log.
+# Prompts and patches were already tee'd separately, but a failure between
+# those two stages — repack, sign, verify — left no trace anywhere, and a
+# failed run could not be reconstructed after the fact. Process substitution
+# rather than a pipe around the rest of the script, because a pipe would run
+# every later `exit` in a subshell and the status would never reach the caller.
+LOG="$WORK/last-apply.log"
+: > "$LOG"
+exec > >(tee -a "$LOG") 2>&1
 if [ ! -f "$BASELINE" ]; then
   # Two independent tests, because neither is sufficient alone. The signature
   # is the general one, but `codesign -dv` reads a per-inode cache that can
@@ -385,6 +395,20 @@ if ! $SEA verify "$BIN" "$VERSION"; then
   exit 1
 fi
 
+# A patch can apply cleanly and still not be in the binary: a later patch may
+# have replaced the very text it wrote. `$SEA verify` only proves the binary
+# starts, so re-apply every patch to the installed bundle — each must refuse
+# ('already patched'). One that applies cleanly was never really in there.
+$SEA extract "$BIN" "$WORK/bundle.installed.js" "$WORK/meta.installed.json"
+if ! node "$HERE/lib/run-patches.mjs" --verify "$WORK/bundle.installed.js" "$PATCH_DIR"; then
+  echo >&2
+  echo "ERROR: a patch is missing from the installed binary even though the run" >&2
+  echo "       applied it — a later patch overwrote its text. The binary stays" >&2
+  echo "       installed (it runs), but do not trust that feature. The conflicting" >&2
+  echo "       pair is named above; one of the two patches needs a wider anchor." >&2
+  exit 1
+fi
+
 # --- what just happened, in one block ---------------------------------------
 # The run scrolls past faster than it can be read, and the menu comes back over
 # it. Everything that matters is restated here: how many patches took, how many
@@ -396,13 +420,62 @@ O_LINE="$(sed -n 's/^prompt overrides: //p' "$WORK/prompts.log" 2>/dev/null \
           | sed 's/ (.*)$//' | tail -1 || true)"
 MISSING="$(sed -n 's/.*, \([0-9]*\) anchor missing.*/\1/p' "$WORK/prompts.log" 2>/dev/null | tail -1)"
 
+# This run's counts, and last run's for the delta. A bare "22 applied" says
+# nothing about whether the run gained or lost ground — which is the only
+# question that matters right after a version bump. The record lives under a
+# `last_run` key in state.json, next to the per-version hashes.
+COUNTS="$(sed -n 's/^PATCH_COUNTS //p' "$WORK/patches.log" 2>/dev/null | tail -1)"
+PROMPT_COUNTS="$(sed -n 's/^prompt overrides: //p' "$WORK/prompts.log" 2>/dev/null | tail -1)"
+NEW_SIZE="$(stat -f '%z' "$BIN" 2>/dev/null || echo 0)"
+read -r CUR_P_CUR CUR_P_SKIP CUR_P_DELTA CUR_O_APP CUR_O_UNCH CUR_O_MISS <<<"$(
+python3 - "$COUNTS" "$PROMPT_COUNTS" <<'PY'
+import json, re, sys
+p = json.loads(sys.argv[1]) if sys.argv[1] else {}
+m = re.match(r'(\d+) applied, (\d+) unchanged, (\d+) drifted, (\d+) anchor missing', sys.argv[2] or '')
+o = (m.group(1), m.group(2), m.group(4)) if m else ('0', '0', '0')
+print(p.get('applied', 0), p.get('skipped', 0), p.get('delta', 0), *o)
+PY
+)"
+
+DELTAS="$(python3 - "$STATE" "$CUR_P_CUR" "$CUR_P_SKIP" "$CUR_O_APP" "$CUR_O_UNCH" "$CUR_O_MISS" "$NEW_SIZE" <<'PY'
+import json, sys
+state, pa, ps, oa, ou, om, size = sys.argv[1], *map(int, sys.argv[2:])
+try: d = json.load(open(state))
+except Exception: d = {}
+prev = d.get('last_run') or {}
+
+def delta(key, now):
+    if key not in prev: return ''
+    diff = now - prev[key]
+    return '  (=)' if diff == 0 else f'  ({diff:+d})'
+
+print(delta('patches_applied', pa))
+print(delta('patches_noop', ps))
+print(delta('prompts_applied', oa))
+print(delta('prompts_unchanged', ou))
+print(delta('prompts_missing', om))
+old = prev.get('binary_size')
+print(f'  ({(size - old):+d} bytes vs last run)' if old else '')
+
+d['last_run'] = {'patches_applied': pa, 'patches_noop': ps, 'patches_failed': 0,
+                 'prompts_applied': oa, 'prompts_unchanged': ou,
+                 'prompts_missing': om, 'binary_size': size}
+json.dump(d, open(state, 'w'), indent=2, sort_keys=True)
+PY
+)"
+D_P_APP="$(sed -n '1p' <<<"$DELTAS")";  D_P_SKIP="$(sed -n '2p' <<<"$DELTAS")"
+D_O_APP="$(sed -n '3p' <<<"$DELTAS")";  D_O_UNCH="$(sed -n '4p' <<<"$DELTAS")"
+D_O_MISS="$(sed -n '5p' <<<"$DELTAS")"; D_SIZE="$(sed -n '6p' <<<"$DELTAS")"
+
 echo
 echo "────────────────────────────────────────────────────────────"
 echo " Apply summary"
 echo
-[ -n "${P_LINE:-}" ] && echo "   patches   ${P_LINE}, 0 failed"
-[ -n "${O_LINE:-}" ] && echo "   prompts   ${O_LINE}"
-echo "   binary    repacked, re-signed ad-hoc, verified $VERSION"
+echo "   patches   ${CUR_P_CUR} applied${D_P_APP}, ${CUR_P_SKIP} no-op${D_P_SKIP}, 0 failed"
+[ -n "${O_LINE:-}" ] && \
+echo "   prompts   ${CUR_O_APP} applied${D_O_APP}, ${CUR_O_UNCH} unchanged${D_O_UNCH}, ${CUR_O_MISS} anchor missing${D_O_MISS}"
+echo "   binary    repacked, re-signed ad-hoc, verified $VERSION${D_SIZE}"
+echo "   present   every patch confirmed in the installed bundle"
 if [ -n "${MISSING:-}" ] && [ "${MISSING:-0}" -gt 0 ] 2>/dev/null; then
   echo
   echo "   ${MISSING} prompt override(s) have no anchor in this build — Kimi moved"
@@ -417,3 +490,29 @@ echo
 echo "Kimi Code $VERSION patched and installed at $BIN"
 echo "Baseline kept at $BASELINE — '$(basename "$0") --restore' puts it back."
 echo "Kimi replaces this binary when it auto-updates; re-run then (KIMI_CLI_NO_AUTO_UPDATE=1 prevents it)."
+echo "Full output: $LOG"
+
+# "Restart Kimi" as a blanket sentence is worthless — it was already printed
+# when two sessions ran on the pre-patch binary and nobody noticed.
+# install_binary writes a fresh inode, so a running process keeps the old one;
+# exactly those are named here, with PID and start time.
+FRESH_INODE="$(stat -f '%i' "$BIN" 2>/dev/null || true)"
+if [ -n "$FRESH_INODE" ] && command -v lsof >/dev/null 2>&1; then
+  STALE=0
+  for pid in $(pgrep -f '(^|/)kimi( |$)' 2>/dev/null); do
+    [ "$pid" = "$$" ] && continue
+    TXT="$(lsof -p "$pid" 2>/dev/null | awk '$4=="txt" {print $(NF-1); exit}')"
+    [ -n "$TXT" ] || continue
+    [ "$TXT" = "$FRESH_INODE" ] && continue
+    if [ "$STALE" -eq 0 ]; then
+      echo
+      echo "running sessions on the pre-patch binary:"
+      STALE=1
+    fi
+    echo "  PID $pid  (started $(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/  */ /g'))"
+  done
+  if [ "$STALE" -eq 1 ]; then
+    echo "  These keep their old binary until restarted — quit and reopen them"
+    echo "  to pick up this run's patches."
+  fi
+fi

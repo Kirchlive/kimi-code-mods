@@ -59,11 +59,10 @@
 // left completely alone.
 //
 // WHAT IS NOT HERE
-// Walking the list with the arrow keys is patches/83-agent-dock-nav.js; this
-// patch only owns `selected` so that one has somewhere to put it. Taking the
-// swarm's own per-agent grid out of the transcript, which this dock makes
-// redundant, is patches/84-swarm-grid-off.js. Both follow `agent_dock` and do
-// nothing while it is off.
+// Walking the list with the arrow keys is included below (the navigation
+// section). Taking the transcript's per-agent displays out, which this dock
+// makes redundant, is patches/84-transcript-dedup.js. Both follow
+// `agent_dock` and do nothing while it is off.
 //
 // Neither patch redirects your typing. Kimi has the machinery for it —
 // `withInteractiveAgent(agentId, fn)` already routes `steer`, `prompt` and
@@ -107,10 +106,19 @@ function splice(label, anchor, replacement) {
   out = out.replace(anchor, () => replacement);
 }
 
+// Already applied? The footer splice is the last one and the most specific —
+// if its replacement is in the bundle, every earlier splice ran too, and the
+// names below are ours. Checking here keeps the idempotency verdict in the
+// contract's own words ('already patched') instead of the name guard's.
+if (out.includes('...kmodsAgentDock.lines(width)')) {
+  throw new Error('already patched');
+}
+
 // A name that already exists in the bundle would be shadowed or would shadow,
 // and either way the failure would surface as a blank footer rather than an
-// error. Cheaper to refuse now.
-for (const name of ['kmodsAgentDock', 'AGENT_DOCK_MODE', 'AGENT_DOCK_MAX_ROWS',
+// error. Cheaper to refuse now. This only fires for names we did not write —
+// our own are caught by the check above.
+for (const name of ['kmodsAgentDock', 'kmodsAgentDockNav', 'AGENT_DOCK_MODE', 'AGENT_DOCK_MAX_ROWS',
                     'AGENT_DOCK_KEEP', 'AGENT_DOCK_TTL_MS']) {
   if (out.includes(name)) {
     throw new Error(`the name ${name} is already taken in this bundle`);
@@ -363,7 +371,7 @@ splice('the runtime reset',
   '\t\tthis.backgroundAgentMetadata.clear();\n' +
   '\t\tthis.activityStore.clear();',
   '\tresetRuntimeState() {\n' +
-  '\t\tconst stillWorking = [...this.activityStore.records.values()].filter((r) => r.status === "running");\n' +
+  '\t\tconst stillWorking = [...this.activityStore.records.values()].filter((r) => r.status === "running" || r.endedAt !== void 0);\n' +
   '\t\tconst keptInfo = new Map();\n' +
   '\t\tconst keptMeta = new Map();\n' +
   '\t\tfor (const record of stillWorking) {\n' +
@@ -379,6 +387,26 @@ splice('the runtime reset',
   '\t\tfor (const [id, info] of keptInfo) this.subagentInfo.set(id, info);\n' +
   '\t\tfor (const [id, meta] of keptMeta) this.backgroundAgentMetadata.set(id, meta);',
   );
+
+// `clearAgentSwarmProgress` is called from `handleTurnBegin` at the start of
+// every turn, wiping the swarm progress map before the still-running members
+// have a chance to re-emit their spawn events. The dock rows vanish for a
+// beat and come back with new numbering. Preserving the entries whose agents
+// are still running keeps the rows — and their ordinals — intact.
+splice('the swarm progress clear',
+  '\tclearAgentSwarmProgress() {\n' +
+  '\t\tfor (const progress of this.agentSwarmProgress.values()) progress.dispose();\n' +
+  '\t\tthis.agentSwarmProgress.clear();',
+  '\tclearAgentSwarmProgress() {\n' +
+  '\t\tconst running = new Set();\n' +
+  '\t\tfor (const record of this.activityStore.records.values()) {\n' +
+  '\t\t\tif (record.status === "running" && record.parentToolCallId) running.add(record.parentToolCallId);\n' +
+  '\t\t}\n' +
+  '\t\tfor (const [key, progress] of this.agentSwarmProgress) {\n' +
+  '\t\t\tif (running.has(key)) continue;\n' +
+  '\t\t\tprogress.dispose();\n' +
+  '\t\t\tthis.agentSwarmProgress.delete(key);\n' +
+  '\t\t}');
 
 // -------------------------------------------------------------- 2. the pruning
 if (MODE === 'all') {
@@ -434,21 +462,11 @@ const helpers =
   '\t{ from: 1,  bar: "\\u28FF\\u28F7\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
   '\t{ from: 0,  bar: "\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" }\n' +
   '];\n' +
-  'var AGENT_DOCK_STOPWORDS = new Set(["je", "und", "oder", "der", "die", "das",\n' +
-  '\t"den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "fuer",\n' +
-  '\t"f\\u00FCr", "mit", "von", "vom", "zu", "zur", "zum", "aus", "auf", "im",\n' +
-  '\t"in", "am", "an", "bei", "nach", "\\u00FCber", "unter", "pro", "als", "wie",\n' +
-  '\t"jeweils", "the", "a", "of", "for", "with", "to", "from", "on", "at",\n' +
-  '\t"by", "and", "or", "each", "per", "into"]);\n' +
   'var kmodsAgentDock = {\n' +
   '\t/** Index of the highlighted agent, -1 when the composer has the focus.\n' +
   '\t*  Owned here rather than in the footer so a navigation patch can move it\n' +
   '\t*  without touching how the rows are drawn. */\n' +
   '\tselected: -1,\n' +
-  '\t/** Agent names that have been worn by two agents at once. Once a name is\n' +
-  '\t*  in here it stays, so a number never disappears from a row that had\n' +
-  '\t*  one. */\n' +
-  '\tduplicated: /* @__PURE__ */ new Set(),\n' +
   '\t/** m:ss, and h:mm:ss once an agent has been at it for an hour. */\n' +
   '\telapsed(ms) {\n' +
   '\t\tconst total = Math.max(0, Math.floor(ms / 1e3));\n' +
@@ -487,50 +505,6 @@ const helpers =
   '\t\treturn currentTheme.dim("[") + (lit ? currentTheme.fg("success", lit) : "") +\n' +
   '\t\t\tcurrentTheme.dim(rest) + currentTheme.dim("]");\n' +
   '\t},\n' +
-  '\t/** The tail of the row: a bar while it works, a verdict once it is done. */\n' +
-  '\tstatusText(record) {\n' +
-  '\t\tif (record.status === "completed") return currentTheme.fg("success", "Finished \\u2713");\n' +
-  '\t\tif (record.status === "failed") return currentTheme.fg("error", "Failed \\u2717");\n' +
-  '\t\treturn this.bar(record);\n' +
-  '\t},\n' +
-  '\t/** The same tail without colour, so its width can be measured without\n' +
-  '\t*  parsing escape sequences back out of the rendered string. */\n' +
-  '\tstatusPlain(record) {\n' +
-  '\t\tif (record.status === "completed") return "Finished \\u2713";\n' +
-  '\t\tif (record.status === "failed") return "Failed \\u2717";\n' +
-  '\t\treturn `[${"x".repeat(AGENT_DOCK_BAR_CELLS)}]`;\n' +
-  '\t},\n' +
-  '\t/** Width of the right-hand column. The bar is the widest thing that\n' +
-  '\t*  goes in it, and every verdict is padded to match, so the bars of\n' +
-  '\t*  several agents line up under each other and can be read as a group\n' +
-  '\t*  rather than one at a time. */\n' +
-  '\tstatusWidth() {\n' +
-  '\t\treturn AGENT_DOCK_BAR_CELLS + 2;\n' +
-  '\t},\n' +
-  '\t/** Two words, `where what`. Descriptions arrive as whole sentences —\n' +
-  '\t*  "3 Agenten: README \\u2192 je 2 docs #1 (coder)" — and a row that carries one\n' +
-  '\t*  of those pushes the bar off the right edge. Bare numbers, arrows,\n' +
-  '\t*  `#1` indices and parenthesised asides carry nothing here, so they are\n' +
-  '\t*  dropped and the first two real words survive. */\n' +
-  '\ttwoWords(text, limit = 2) {\n' +
-  '\t\tif (typeof text !== "string" || text.length === 0) return "";\n' +
-  '\t\tconst kept = [];\n' +
-  '\t\tconst all = [];\n' +
-  '\t\tfor (const raw of text.split(/\\s+/)) {\n' +
-  '\t\t\tif (/^\\(.*\\)[.,;:]?$/.test(raw)) continue;\n' +
-  '\t\t\tconst word = raw.replace(/^[^\\p{L}\\p{N}]+/u, "").replace(/[^\\p{L}\\p{N}.\\-_]+$/u, "");\n' +
-  '\t\t\tif (word.length === 0 || !/\\p{L}/u.test(word)) continue;\n' +
-  '\t\t\tconst clipped = word.length > 20 ? `${word.slice(0, 19)}\\u2026` : word;\n' +
-  '\t\t\tall.push(clipped);\n' +
-  '\t\t\tif (!AGENT_DOCK_STOPWORDS.has(word.toLowerCase())) kept.push(clipped);\n' +
-  '\t\t}\n' +
-  '\t\t// Function words survive the filter above — they are letters — but\n' +
-  '\t\t// carry nothing: "3 Agenten je 2 docs" reduced to "Agenten je", which\n' +
-  '\t\t// says half of nothing. They are dropped unless doing so would leave\n' +
-  '\t\t// too little to say at all.\n' +
-  '\t\tconst words = kept.length >= limit ? kept : (kept.length > 0 && all.length < limit ? kept : all);\n' +
-  '\t\treturn words.slice(0, limit).join(" ");\n' +
-  '\t},\n' +
   '\t/** The bullet, doubling as a state light rather than a blink.\n' +
   '\t*  Four states, no timers: empty when idle, grey while a call is out,\n' +
   '\t*  green on the last call coming back clean, red on it coming back bad.\n' +
@@ -556,8 +530,7 @@ const helpers =
   '\t\t\t// `git status`, `npm test`. Only the program name would leave the\n' +
   '\t\t\t// row saying `Bash git`, which is barely more than `Bash`.\n' +
   '\t\t\tconst head = key === "command" ? raw.trim().split(/\\s+/).slice(0, 2).join(" ") : raw;\n' +
-  '\t\t\tconst leaf = key === "command" ? head : (head.split("/").filter(Boolean).pop() ?? head);\n' +
-  '\t\t\treturn leaf.length > 24 ? `${leaf.slice(0, 23)}\\u2026` : leaf;\n' +
+  '\t\t\treturn head;\n' +
   '\t\t}\n' +
   '\t\treturn "";\n' +
   '\t},\n' +
@@ -686,31 +659,35 @@ const helpers =
   '\t\t});\n' +
   '\t},\n' +
   '\t/** One agent:\n' +
-  '\t*  indicator bar name · model · effort · N tools · Nk · m:ss · task\n' +
+  '\t*  indicator bar name #N · model · effort · N tools · Nk · m:ss · task\n' +
   '\t*  The bar sits left, right after the indicator, so all rows share the\n' +
   '\t*  same left edge for the bar and can be compared at a glance. */\n' +
-  '\tline(record, width, selected = false, note = "", ordinal = 0, shared = false) {\n' +
-  '\t\tconst name = (record.agentName ?? "agent") + (ordinal > 0 ? ` #${String(ordinal)}` : "");\n' +
-  '\t\tconst topic = shared ? "" : this.twoWords(record.description, 1);\n' +
-  '\t\tconst label = topic ? `${name} ${topic}` : name;\n' +
+  '\tline(record, width, selected = false, ordinal = 0) {\n' +
+  '\t\tconst name = (record.agentName ?? "agent") + ` #${String(Math.max(1, ordinal))}`;\n' +
   '\t\tconst fields = [{\n' +
-  '\t\t\ttext: label,\n' +
-  '\t\t\trendered: currentTheme.fg("primary", name) + (topic ? ` ${currentTheme.dim(topic)}` : "")\n' +
+  '\t\t\ttext: name,\n' +
+  '\t\t\trendered: currentTheme.fg("primary", name)\n' +
   '\t\t}];\n' +
-  '\t\tif (record.model !== void 0) fields.push({ text: record.model });\n' +
-  '\t\tif (record.effort !== void 0) fields.push({ text: record.effort });\n' +
+  '\t\t// Model and effort: the v1 engine does not put them on the spawn\n' +
+  '\t\t// event, so the record arrives without them. The metadata map is\n' +
+  '\t\t// written by the same handler and carries them for background agents.\n' +
+  '\t\tconst model = record.model ?? kmodsAgentDock.metaFor(record)?.model;\n' +
+  '\t\tconst effort = record.effort ?? kmodsAgentDock.metaFor(record)?.thinkingEffort;\n' +
+  '\t\tif (model !== void 0) fields.push({ text: model });\n' +
+  '\t\tif (effort !== void 0) fields.push({ text: effort });\n' +
   '\t\tconst toolCount = record.toolCount ?? 0;\n' +
   '\t\tfields.push({ text: `${String(toolCount)} tool${toolCount === 1 ? "" : "s"}` });\n' +
   '\t\tconst tokens = record.contextTokens && record.contextTokens > 0 ? record.contextTokens : record.usageTokens ?? 0;\n' +
   '\t\tif (tokens > 0) fields.push({ text: this.tokens(tokens) });\n' +
   '\t\tif (record.startedAt !== void 0) fields.push({ text: this.elapsed((record.endedAt ?? Date.now()) - record.startedAt) });\n' +
   '\t\t// Task last — it is the longest field and the first to be trimmed.\n' +
+  '\t\t// A finished agent with no task reads "idle" rather than nothing.\n' +
   '\t\tconst task = this.task(record);\n' +
   '\t\tif (task) fields.push({ text: task, shrink: true });\n' +
-  '\t\tif (note) fields.push({ text: note });\n' +
+  '\t\telse if (record.status !== "running") fields.push({ text: "idle" });\n' +
   '\t\t// Completed/failed verdict as a field, not a right-aligned block.\n' +
-  '\t\tif (record.status === "completed") fields.push({ text: "Finished \\u2713", rendered: currentTheme.fg("success", "Finished \\u2713") });\n' +
-  '\t\tif (record.status === "failed") fields.push({ text: "Failed \\u2717", rendered: currentTheme.fg("error", "Failed \\u2717") });\n' +
+  '\t\tif (record.status === "completed") fields.push({ text: "[Finished]", rendered: currentTheme.fg("success", "[Finished]") });\n' +
+  '\t\tif (record.status === "failed") fields.push({ text: "[Failed]", rendered: currentTheme.fg("error", "[Failed]") });\n' +
   '\t\tconst head = selected ? currentTheme.fg("primary", "\\u276F ") : this.marker(record);\n' +
   '\t\t// The bar sits left, right after the indicator, so all rows share the\n' +
   '\t\t// same left edge for the bar and can be compared at a glance.\n' +
@@ -720,6 +697,14 @@ const helpers =
   '\t\tconst room = Math.max(0, width - prefixWidth);\n' +
   '\t\tconst left = this.fit(fields, room);\n' +
   '\t\treturn truncateToWidth(prefix + left, width);\n' +
+  '\t},\n' +
+  '\t/** The metadata map entry for a record, if there is one. Read lazily\n' +
+  '\t*  so the dock does not hold a reference that would go stale on reset. */\n' +
+  '\tmetaFor(record) {\n' +
+  '\t\tif (typeof SubagentActivityStore === "undefined") return void 0;\n' +
+  '\t\tconst store = SubagentActivityStore.current;\n' +
+  '\t\tif (store === void 0 || store === null) return void 0;\n' +
+  '\t\treturn store.backgroundAgentMetadata?.get(record.agentId);\n' +
   '\t},\n' +
   '\t/** The rows appended below the footer, or none at all when no subagent\n' +
   '\t*  is worth showing — an empty dock must cost no screen.\n' +
@@ -762,34 +747,22 @@ const helpers =
   '\t\t// out with nothing to explain it reads as a fault.\n' +
   '\t\t// Number each agent once and keep it on the record. Deriving the\n' +
   '\t\t// number from the current list instead made it move: when the second\n' +
-  '\t\t// of two agents finished and dropped out, the name was no longer\n' +
-  '\t\t// duplicated and `coder #1` silently became `coder` mid-run, which\n' +
-  '\t\t// reads as a different agent. Counting per name across the whole\n' +
-  '\t\t// list, not the visible page, also keeps it steady while cycling.\n' +
+  '\t\t// of two agents finished and dropped out, `coder #1` silently became\n' +
+  '\t\t// `coder` mid-run, which reads as a different agent. Counting per name\n' +
+  '\t\t// across the whole list, not the visible page, also keeps it steady\n' +
+  '\t\t// while cycling.\n' +
   '\t\tconst seen = /* @__PURE__ */ new Map();\n' +
   '\t\tfor (const record of records) {\n' +
   '\t\t\tconst key = record.agentName ?? "agent";\n' +
   '\t\t\tconst n = (seen.get(key) ?? 0) + 1;\n' +
   '\t\t\tseen.set(key, n);\n' +
   '\t\t\trecord.dockOrdinal ??= n;\n' +
-  '\t\t\t// Once a name has been worn by two agents at once, every one of\n' +
-  '\t\t\t// them keeps its number for the rest of the session.\n' +
-  '\t\t\tif (n > 1) this.duplicated.add(key);\n' +
   '\t\t}\n' +
-  '\t\t// Is the description common to all of them? Then it distinguishes\n' +
-  '\t\t// nobody and every row is better off without it. Compared at the same\n' +
-  '\t\t// length that gets drawn — comparing two words while showing one let\n' +
-  '\t\t// three rows that differ only in a dropped second word each keep a\n' +
-  '\t\t// first word identical to the others.\n' +
-  '\t\tconst descriptions = new Set(records.map((r) => this.twoWords(r.description, 1)));\n' +
-  '\t\tconst shared = records.length > 1 && descriptions.size === 1;\n' +
   '\t\tconst rows = shown.map((record, i) => this.line(\n' +
   '\t\t\trecord,\n' +
   '\t\t\twidth,\n' +
   '\t\t\tfirstIndex + i === selected,\n' +
-  '\t\t\t"",\n' +
-  '\t\t\tthis.duplicated.has(record.agentName ?? "agent") ? record.dockOrdinal : 0,\n' +
-  '\t\t\tshared\n' +
+  '\t\t\trecord.dockOrdinal ?? 0\n' +
   '\t\t));\n' +
   '\t\t// A footer line, the way Claude Code carries one: what is off screen,\n' +
   '\t\t// and which keys apply here. A list that quietly swaps itself out\n' +
@@ -811,5 +784,152 @@ splice('the footer component\'s head', 'var FooterComponent = class {', helpers 
 splice('the footer\'s two-line return',
   '\t\treturn [truncateToWidth(line1, width), truncateToWidth(line2, width)];',
   '\t\treturn [truncateToWidth(line1, width), truncateToWidth(line2, width), ...kmodsAgentDock.lines(width)];');
+
+// ------------------------------------------------------------ 4. navigation
+//
+// Walk the subagent dock with the arrow keys, and open one to watch it work.
+//
+// WHERE THE KEYS COME FROM
+// Kimi already distinguishes an arrow key pressed in a *non-empty* composer
+// (move the cursor) from one pressed in an empty one, and routes the latter
+// through two dedicated hooks in
+// `src/tui/controllers/editor-keyboard.ts`:
+//
+//   editor.onUpArrowEmpty   = () => { if (host.btwPanelController.scroll("up")) …
+//   editor.onDownArrowEmpty = () => host.btwPanelController.scroll("down");
+//
+// Both return a boolean meaning "I consumed this key". That is the whole
+// contract this patch needs, so the dock is offered the key first and Kimi's
+// own handling runs unchanged whenever the dock declines. Typing is never
+// affected: with any text in the composer these hooks do not fire at all.
+//
+// `onSubmit` and `onEscape` are wrapped the same way — but only ever act when
+// a row is actually selected, so Enter keeps sending prompts and Escape keeps
+// doing what it did for as long as the composer holds the focus.
+//
+// WHAT ENTER OPENS
+// `AgentActivityViewer`, the component `/tasks` already uses to show what a
+// subagent is doing — steps, tool calls, output — over a screen takeover, the
+// same mechanism the tasks browser opens with. It reads its content straight
+// from the activity store record, so a foreground agent works as well as a
+// background one; the task metadata it would otherwise show in the header is
+// simply absent, which the component already tolerates.
+//
+// Its own key handling gives us Escape, q, ctrl-o and the scrolling for free,
+// and `onClose` puts the screen back the way it was.
+//
+// WHY THE VIEWER IS NOT KEPT IN SYNC
+// The tasks browser re-pushes props every second so a running agent's view
+// keeps growing. This patch does not: the record object it hands over is the
+// live one from the store, and the viewer re-reads it on every render. What is
+// missing is the repaint, so the view only advances when something else asks
+// the screen to redraw — which, while an agent is working, is constantly.
+
+// Hung off the dock object rather than declared beside it, so both patches
+// keep exactly one name between them and the state lives where the rows that
+// read it live.
+splice('the dock object',
+  'var kmodsAgentDock = {\n',
+  'var kmodsAgentDockNav = {\n' +
+  '\t/** Down from the composer selects the first agent, then walks down the\n' +
+  '\t*  list. Returns false once there is nothing below, so the key falls\n' +
+  '\t*  through to whatever Kimi did with it before. */\n' +
+  '\tdown() {\n' +
+  '\t\tconst count = kmodsAgentDock.records().length;\n' +
+  '\t\tif (count === 0) return false;\n' +
+  '\t\tif (kmodsAgentDock.selected >= count - 1) return false;\n' +
+  '\t\tkmodsAgentDock.selected += 1;\n' +
+  '\t\treturn true;\n' +
+  '\t},\n' +
+  '\t/** Up walks back and hands the focus to the composer at the top. */\n' +
+  '\tup() {\n' +
+  '\t\tif (kmodsAgentDock.selected < 0) return false;\n' +
+  '\t\tkmodsAgentDock.selected -= 1;\n' +
+  '\t\treturn true;\n' +
+  '\t},\n' +
+  '\tclear() {\n' +
+  '\t\tif (kmodsAgentDock.selected < 0) return false;\n' +
+  '\t\tkmodsAgentDock.selected = -1;\n' +
+  '\t\treturn true;\n' +
+  '\t},\n' +
+  '\tselectedRecord() {\n' +
+  '\t\tconst records = kmodsAgentDock.records();\n' +
+  '\t\tif (kmodsAgentDock.selected < 0 || kmodsAgentDock.selected >= records.length) return void 0;\n' +
+  '\t\treturn records[kmodsAgentDock.selected];\n' +
+  '\t},\n' +
+  '\t/** Open the selected agent over the whole screen. Any failure leaves the\n' +
+  '\t*  selection alone and reports false, so a broken view can never swallow\n' +
+  '\t*  the Enter that would have sent a prompt. */\n' +
+  '\topen(host) {\n' +
+  '\t\tconst record = this.selectedRecord();\n' +
+  '\t\tif (record === void 0) return false;\n' +
+  '\t\tif (typeof AgentActivityViewer === "undefined" || typeof beginScreenTakeover === "undefined") return false;\n' +
+  '\t\tconst state = host?.state;\n' +
+  '\t\tif (state === void 0 || state.ui === void 0) return false;\n' +
+  '\t\ttry {\n' +
+  '\t\t\tlet takeover;\n' +
+  '\t\t\tconst viewer = new AgentActivityViewer({\n' +
+  '\t\t\t\ttaskId: record.agentId,\n' +
+  '\t\t\t\tinfo: void 0,\n' +
+  '\t\t\t\trecord,\n' +
+  '\t\t\t\tonClose: () => {\n' +
+  '\t\t\t\t\tendScreenTakeover(state.ui, takeover);\n' +
+  '\t\t\t\t\tstate.ui.setFocus(state.editor);\n' +
+  '\t\t\t\t\tstate.ui.requestRender(true);\n' +
+  '\t\t\t\t}\n' +
+  '\t\t\t}, state.terminal);\n' +
+  '\t\t\ttakeover = beginScreenTakeover(state.ui, viewer);\n' +
+  '\t\t\tstate.ui.setFocus(viewer);\n' +
+  '\t\t\tstate.ui.requestRender(true);\n' +
+  '\t\t\treturn true;\n' +
+  '\t\t} catch {\n' +
+  '\t\t\treturn false;\n' +
+  '\t\t}\n' +
+  '\t}\n' +
+  '};\n' +
+  'var kmodsAgentDock = {\n');
+
+// ------------------------------------------------------------------ the keys
+splice('the empty-composer down arrow',
+  '\t\teditor.onDownArrowEmpty = () => host.btwPanelController.scroll("down");',
+  '\t\teditor.onDownArrowEmpty = () => {\n' +
+  '\t\t\tif (kmodsAgentDockNav.down()) {\n' +
+  '\t\t\t\thost.state.ui.requestRender();\n' +
+  '\t\t\t\treturn true;\n' +
+  '\t\t\t}\n' +
+  '\t\t\treturn host.btwPanelController.scroll("down");\n' +
+  '\t\t};');
+
+splice('the empty-composer up arrow',
+  '\t\teditor.onUpArrowEmpty = () => {\n' +
+  '\t\t\tif (host.btwPanelController.scroll("up")) return true;',
+  '\t\teditor.onUpArrowEmpty = () => {\n' +
+  '\t\t\tif (kmodsAgentDockNav.up()) {\n' +
+  '\t\t\t\thost.state.ui.requestRender();\n' +
+  '\t\t\t\treturn true;\n' +
+  '\t\t\t}\n' +
+  '\t\t\tif (host.btwPanelController.scroll("up")) return true;');
+
+// Enter opens the highlighted agent instead of sending the composer's text.
+// Only when something is highlighted — otherwise this is not in the path at
+// all.
+splice('the composer submit',
+  '\t\teditor.onSubmit = (text) => {',
+  '\t\teditor.onSubmit = (text) => {\n' +
+  '\t\t\tif (kmodsAgentDockNav.selectedRecord() !== void 0) {\n' +
+  '\t\t\t\tconst opened = kmodsAgentDockNav.open(host);\n' +
+  '\t\t\t\tkmodsAgentDockNav.clear();\n' +
+  '\t\t\t\tif (opened) return;\n' +
+  '\t\t\t}');
+
+// `onEscape` is a void handler — every branch of it ends in a bare `return`,
+// so this one does too rather than inventing a boolean the caller never reads.
+splice('the composer escape',
+  '\t\teditor.onEscape = () => {',
+  '\t\teditor.onEscape = () => {\n' +
+  '\t\t\tif (kmodsAgentDockNav.clear()) {\n' +
+  '\t\t\t\thost.state.ui.requestRender();\n' +
+  '\t\t\t\treturn;\n' +
+  '\t\t\t}');
 
 return out;

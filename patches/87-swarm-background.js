@@ -53,16 +53,17 @@
 //
 // Follows `agent_background` in patch-settings.conf, and therefore `agent_dock`
 // as well:
-//   default  the swarm blocks the turn, as Kimi ships it
-//   always   the swarm runs detached
+//   default    the swarm blocks the turn, as Kimi ships it
+//   always     the swarm runs detached
+//   immediate  like always, and the turn ends at dispatch (stopTurn)
 // Requires patches/86-agent-background-default.js to be in the same run; on its
 // own the single-agent path would still be left to the model.
 
 const DOCK = String(settings.get('agent_dock', 'off')).toLowerCase();
 const CHOSEN = String(settings.get('agent_background', 'default')).toLowerCase();
-const MODE = DOCK === 'off' ? CHOSEN : 'always';
+const MODE = DOCK === 'off' ? CHOSEN : (CHOSEN === 'immediate' ? 'immediate' : 'always');
 
-if (MODE !== 'always') {
+if (MODE !== 'always' && MODE !== 'immediate') {
   throw new Error('already patched');
 }
 
@@ -80,6 +81,13 @@ function splice(label, anchor, replacement) {
     throw new Error(`${label} is not unique (${n}) - refusing to guess`);
   }
   out = out.replace(anchor, () => replacement);
+}
+
+// Already applied? The task class is the first thing this patch writes and
+// the most specific string it owns — if it is in the bundle, the names below
+// are ours, and the verdict belongs to the contract, not the name guard.
+if (out.includes('var KmodsSwarmTask = class {')) {
+  throw new Error('already patched');
 }
 
 for (const name of ['KmodsSwarmTask', 'kmodsSwarmResult']) {
@@ -167,9 +175,9 @@ splice('the swarm tool\'s fields',
 // Appended as the last constructor parameter so every existing index keeps its
 // meaning; the container resolves it the same way the `Agent` tool's does.
 splice('the swarm tool\'s constructor',
-  '\t\tconstructor(swarmService, scopeContext, swarmMode, config, flags, catalog, profile) {\n' +
+  '\t\tconstructor(swarmService, scopeContext, swarmMode, config, flags, subagents, profile) {\n' +
   '\t\t\tthis.swarmService = swarmService;',
-  '\t\tconstructor(swarmService, scopeContext, swarmMode, config, flags, catalog, profile, kmodsTasks) {\n' +
+  '\t\tconstructor(swarmService, scopeContext, swarmMode, config, flags, subagents, profile, kmodsTasks) {\n' +
   '\t\t\tthis.kmodsTasks = kmodsTasks;\n' +
   '\t\t\tthis.swarmService = swarmService;');
 
@@ -182,7 +190,7 @@ splice('the swarm tool\'s decorators',
   '\t\t__decorateParam(2, IAgentSwarmService),\n' +
   '\t\t__decorateParam(3, IConfigService),\n' +
   '\t\t__decorateParam(4, IFlagService),\n' +
-  '\t\t__decorateParam(5, ISessionAgentProfileCatalog),\n' +
+  '\t\t__decorateParam(5, ISessionSubagentService),\n' +
   '\t\t__decorateParam(6, IAgentProfileService)',
   '\tAgentSwarmTool = __decorate([\n' +
   '\t\t__decorateParam(0, ISessionSwarmService),\n' +
@@ -190,7 +198,7 @@ splice('the swarm tool\'s decorators',
   '\t\t__decorateParam(2, IAgentSwarmService),\n' +
   '\t\t__decorateParam(3, IConfigService),\n' +
   '\t\t__decorateParam(4, IFlagService),\n' +
-  '\t\t__decorateParam(5, ISessionAgentProfileCatalog),\n' +
+  '\t\t__decorateParam(5, ISessionSubagentService),\n' +
   '\t\t__decorateParam(6, IAgentProfileService),\n' +
   '\t\t__decorateParam(7, IAgentTaskService)');
 
@@ -242,5 +250,50 @@ splice('the swarm tool\'s result',
   '\t\t\t\t"",\n' +
   '\t\t\t\t"next_step: This turn is OVER. The swarm runs as a background task and its combined result arrives as a <notification> in a future turn. Do NOT call WaitFor, TaskOutput, or any other tool to check on it. Do NOT end your response with a summary of what the swarm will do — end the turn now. If there is nothing else to do, say so briefly and stop. To cancel the swarm, use TaskStop with the task_id above."\n' +
   '\t\t\t].join("\\n");');
+
+// ------------------------------------------------------------- stopTurn
+//
+// In `immediate` mode the turn ends the moment the swarm is dispatched.
+// The execution wrapper reads `{ output: ... }` from `runSwarm`; adding
+// `stopTurn: true` there means the loop skips the continuation call and
+// the model is never re-invoked.
+if (MODE === 'immediate') {
+  // The anchor carries the `resolveExecution` tail: `ToolAccesses.all()`
+  // without a `$1` suffix is what tells the live v2 copy from the inert v1
+  // twin — the `execution` body itself is byte-identical in both.
+  splice('the swarm tool\'s execution wrapper',
+    '\t\t\t\taccesses: ToolAccesses.all(),\n' +
+    '\t\t\t\tdescription: `Launching agent swarm: ${args.description}`,\n' +
+    '\t\t\t\tdisplay: {\n' +
+    '\t\t\t\t\tkind: "agent_call",\n' +
+    '\t\t\t\t\tagent_name: `swarm (${agentCount} subagents)`,\n' +
+    '\t\t\t\t\tprompt: args.description\n' +
+    '\t\t\t\t},\n' +
+    '\t\t\t\tapprovalRule: this.name,\n' +
+    '\t\t\t\texecute: (ctx) => this.execution(args, ctx)\n' +
+    '\t\t\t};\n' +
+    '\t\t}\n' +
+    '\t\tasync execution(args, context) {\n' +
+    '\t\t\ttry {\n' +
+    '\t\t\t\tthis.swarmMode.enter("tool");\n' +
+    '\t\t\t\treturn { output: await this.runSwarm(args, context.signal, context.toolCallId) };',
+    '\t\t\t\taccesses: ToolAccesses.all(),\n' +
+    '\t\t\t\tdescription: `Launching agent swarm: ${args.description}`,\n' +
+    '\t\t\t\tdisplay: {\n' +
+    '\t\t\t\t\tkind: "agent_call",\n' +
+    '\t\t\t\t\tagent_name: `swarm (${agentCount} subagents)`,\n' +
+    '\t\t\t\t\tprompt: args.description\n' +
+    '\t\t\t\t},\n' +
+    '\t\t\t\tapprovalRule: this.name,\n' +
+    '\t\t\t\texecute: (ctx) => this.execution(args, ctx)\n' +
+    '\t\t\t};\n' +
+    '\t\t}\n' +
+    '\t\tasync execution(args, context) {\n' +
+    '\t\t\ttry {\n' +
+    '\t\t\t\tthis.swarmMode.enter("tool");\n' +
+    '\t\t\t\tconst kmodsResult = await this.runSwarm(args, context.signal, context.toolCallId);\n' +
+    '\t\t\t\tif (typeof kmodsResult === "string" && kmodsResult.includes("task_id:")) return { output: kmodsResult, stopTurn: true };\n' +
+    '\t\t\t\treturn { output: kmodsResult };');
+}
 
 return out;
