@@ -409,17 +409,66 @@ splice('the swarm progress clear',
   '\t\t}');
 
 // -------------------------------------------------------------- 2. the pruning
+//
+// A swarm member stays foreground-shaped even when its swarm is a registered
+// background task: `KmodsSwarmTask` carries the parent's tool-call id, not the
+// members' agent ids, so the turn-end sweep (`dropForegroundOnlyActivityRecords`,
+// called from `handleTurnEnd`) matches none of them and drops their records
+// while they are still working. With `agent_background = immediate` the turn
+// ends the moment the swarm is dispatched — the sweep runs BEFORE the members'
+// `subagent.spawned` events even exist (spawn awaits binding, permissions, turn
+// setup; the sweep runs 3ms after task registration), and the records that
+// arrive later come back as `agent-N` placeholders.
+//
+// The parentToolCallId guard below cannot fix that timing: at sweep time there
+// is no record to match. The robust fix is one level up, in the sweep itself:
+// a record marked `running` is never dropped at turn end. The sweep's original
+// purpose — clearing foreground subagents aborted with the turn, which emit no
+// terminal event — does not apply here: every subagent these patches dispatch
+// runs detached, and swarm members always terminate through the batch.
+splice('the turn-end record sweep',
+  '\tdropForegroundOnlyActivityRecords() {\n' +
+  '\t\tfor (const agentId of this.activityStore.agentIds()) this.pruneForegroundOnlyRecord(agentId);\n' +
+  '\t}',
+  '\tdropForegroundOnlyActivityRecords() {\n' +
+  '\t\tfor (const agentId of this.activityStore.agentIds()) {\n' +
+  '\t\t\tconst record = this.activityStore.get(agentId);\n' +
+  '\t\t\tif (record !== void 0 && record.status === "running") continue;\n' +
+  '\t\t\tthis.pruneForegroundOnlyRecord(agentId);\n' +
+  '\t\t}\n' +
+  '\t}');
+
+// The parentToolCallId guard stays as the second line of defence: a member
+// whose record exists AND is running AND shares its parent call with a
+// registered task is kept even if something else calls the prune directly.
+//
+// Keeping *finished* records is an `all`-only behaviour below it.
+const SWARM_GUARD =
+  '\t\tconst kept = this.activityStore.get(subagentId);\n' +
+  '\t\tif (kept !== void 0 && kept.status === "running" && kept.parentToolCallId) {\n' +
+  '\t\t\tfor (const info of this.deps.backgroundTasks.values()) {\n' +
+  '\t\t\t\tif (info.kind === "agent" && info.parentToolCallId === kept.parentToolCallId) return;\n' +
+  '\t\t\t}\n' +
+  '\t\t}\n';
+
 if (MODE === 'all') {
   splice('the foreground-record pruning',
     '\tpruneForegroundOnlyRecord(subagentId) {\n' +
     '\t\tif (this.backgroundAgentMetadata.has(subagentId)) return;',
     '\tpruneForegroundOnlyRecord(subagentId) {\n' +
-    '\t\tconst kept = this.activityStore.get(subagentId);\n' +
+    SWARM_GUARD +
     '\t\tif (kept !== void 0 && kept.status !== "running") {\n' +
     '\t\t\tkept.endedAt ??= Date.now();\n' +
     '\t\t\tthis.activityStore.trimFinished(AGENT_DOCK_KEEP);\n' +
     '\t\t\treturn;\n' +
     '\t\t}\n' +
+    '\t\tif (this.backgroundAgentMetadata.has(subagentId)) return;');
+} else {
+  splice('the foreground-record pruning',
+    '\tpruneForegroundOnlyRecord(subagentId) {\n' +
+    '\t\tif (this.backgroundAgentMetadata.has(subagentId)) return;',
+    '\tpruneForegroundOnlyRecord(subagentId) {\n' +
+    SWARM_GUARD +
     '\t\tif (this.backgroundAgentMetadata.has(subagentId)) return;');
 }
 
