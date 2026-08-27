@@ -66,6 +66,15 @@ beobachtet · `offen` noch nicht gebaut.
 49. Werkzeug-Presets            | toolsets.conf, config-menu Punkt 8        | ungetestet
 50. Subagenten-Modellpool       | built-in: [secondary_model], config-menu 9 | ungetestet
 51. Hook-Editor                 | config-menu Punkt 10, [[hooks]]-Bloecke    | ungetestet
+
+52. Cron-Drop-Verzeichnis       | patches/81-cron-drop-dir.js (XState, 0.39) | done
+53. Agent-Dock im Footer        | patches/82-agent-dock.js, agent_dock       | done
+54. Transcript-Dedup            | patches/84-transcript-dedup.js             | done
+55. Subagenten im Hintergrund   | patches/86-…, agent_background=always      | done
+56. Turn endet am Dispatch      | patches/86+87, agent_background=immediate  | done
+57. Swarm als Hintergrund-Task  | patches/87-swarm-background.js             | done
+58. Patch-Nachweis im Binary    | run-patches.mjs --verify, kimi-patch.sh    | done
+59. Lauf-Protokoll + Delta      | .work/last-apply.log, state.json last_run  | done
 ```
 
 Zeile 36 läuft im installierten Binary: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md",
@@ -256,3 +265,54 @@ Stellen `appState.workDir`, mehrere davon einmalig bei der Konstruktion
 Sitzung in einem anderen Verzeichnis" über `setAppState` plus
 `createNewSession()` — das verwirft allerdings die Unterhaltung und ist damit
 nicht das, was `/cd` in Claude Code tut.
+
+**52** — Neugeschrieben für 0.39.0: der Cron-Dienst ist keine DI-Klasse mehr,
+sondern eine XState-Actor-Runtime. `scanCronDropDir()` hängt als freie Funktion
+vor `tickCron()` und holt sich den Session-Kontext über
+`runtime.get(ISessionContext)`.
+
+**53** — Live bestätigt am 2026-08-27: stehende Zeile je Agent unter dem
+Composer — Indikator, Bar links, `name #N`, Modell, Effort, Werkzeugzahl,
+Tokens, Laufzeit, aktuelle Aktion. Vier Indikator-Zustände ohne Timer: leer
+(idle), grau gefüllt (Aufruf unterwegs), grün (letztes Ergebnis ok), rot
+(letztes Ergebnis Fehler). Pfeiltasten wandern die Liste, Enter öffnet den
+Activity-Viewer. Zwei echte Fallstricke dabei: Kind-Events kommen oft vor
+`subagent.spawned` an — `ensureRecord` muss Name/Modell/Effort nachziehen,
+sonst steht dauerhaft `agent-6` statt `coder #1` im Dock. Und ein Werkzeug-
+Aufruf, dessen Argumente streamen, wird von `tool.call.delta` angelegt; wer nur
+in `tool.call.started` zählt, zeigt `0 tools`, während die Zeile laengst
+`Read foo.md` sagt.
+
+**54** — Frueher zwei Patches (Swarm-Grid, Agent-Group); beide unterdruecken
+Transcript-Ansichten, die der Dock doppelt zeigt, und beide haengen allein an
+`agent_dock`. Zusammengelegt, weil ein Bruch in beiden harmlos ist (man sieht
+die Info doppelt) und ein File weniger zu pflegen ist.
+
+**55/56** — `always` setzt `run_in_background` auf dem Weg durch
+`resolveExecution`, egal was das Modell waehlte. `immediate` geht weiter und
+setzt `stopTurn: true` auf das Tool-Result: der Loop wertet das als
+`finishReason = "completed"` und ruft das Modell nicht noch einmal auf. Der
+erste Ansatz drehte stattdessen den Ratgeber-Prompt um („Default to
+background") — unzuverlaessig, weil das Modell die Wahl behaelt. Die Prompt-
+Overrides sind zurueckgenommen; der Mechanismus traegt die Garantie jetzt
+allein. Kosten von `immediate`: eine Antwort, die dispatchen UND noch etwas
+tun wollte, tut nur das Erste. Gewollt.
+
+**57** — Der Swarm wird als **ein** Task registriert (`KmodsSwarmTask`), nicht
+als einer je Mitglied: `renderSwarmResults` baut ein gemeinsames Dokument, und
+ein halb gemeldeter Swarm ist schlechter als einer, der spaet kommt. Faellt die
+Registrierung fehl (Task-Limit), wird der Swarm wie bisher awaited — eine
+langsame Antwort schlaegt eine verlorene.
+
+**58** — Nach dem Einspielen wird jeder Patch erneut gegen das installierte
+Bundle gefahren; jeder muss `already patched` werfen. Einer, der sauber
+durchliefe, waere nie drin gewesen — ein spaeterer Patch hat genau den Text
+ersetzt, den er schrieb. `$SEA verify` allein beweist nur, dass das Binary
+startet.
+
+**59** — Das Protokoll laeuft ueber Prozess-Substitution statt einer Pipe um
+den Rest des Skripts, damit `exit`-Codes erhalten bleiben. Die Bilanz zeigt
+Deltas zum Vorlauf aus `state.json → last_run`. Am Ende nennt `lsof` laufende
+`kimi`-Prozesse auf dem alten Inode mit PID und Startzeit — der pauschale
+Satz „Restart Kimi" stand schon da, als zwei Sessions auf dem Vorpatch-Binary
+liefen und niemand es merkte.

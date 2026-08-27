@@ -45,7 +45,17 @@ test suite does exactly this).
   than once. Never patch by offset.
 - Throw `new Error('already patched')` for the no-op case — this is the only
   message treated as a skip. Anything else thrown fails the run and leaves
-  the installed binary untouched.
+  the installed binary untouched. A **name guard** (`the name X is already
+  taken`) must come *after* an own-marker check (`if (js.includes(<most
+  specific string this patch writes>)) throw new Error('already patched')`) —
+  otherwise the guard fires on the patch's own work when re-applied, and the
+  patch runner's verify pass (`--verify`) misreads it as missing.
+- The patch runner re-applies every patch to the installed bundle after
+  installation (`run-patches.mjs --verify`); each must throw 'already
+  patched'. One that applies cleanly there was never in the binary.
+- A patch with mode-dependent splices is only covered by the bundle test for
+  the modes listed in `ACTIVE` in `lib/test_patches.mjs` — register the
+  strongest mode there, or its anchors sit on an untested path.
 - **New setting?** Register its default in `lib/patch_settings.py`
   (`DEFAULTS`). The menu builds rows from that table, so an unregistered
   switch is invisible. Every registered switch must appear in exactly one
