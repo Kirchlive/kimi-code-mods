@@ -358,7 +358,8 @@ def build_items(st: State) -> list[Item]:
         Item('submenu', 'Toolsets', key='toolsets',
              help='Named lists of disabled tools, applied in one keystroke.'),
         Item('submenu', 'Subagent models', key='subagent',
-             help='Which model a subagent runs on. Needs the secondary-model flag.'),
+             help='Which model a subagent runs on, and whether they are '
+                  'listed under the composer.'),
         Item('submenu', 'Complexity effort router', key='router',
              help='Set reasoning effort per turn from the prompt. pin only ever raises it.'),
         Item('submenu', 'Tool setup', key='tools',
@@ -786,6 +787,16 @@ PATCH_HELP = {
         'Fire JSON files dropped into <sessionDir>/cron/ as one-shot cron '
         'turns. For an external bus daemon; nothing typed reaches the session.',
         'cron-drop'),
+    'agent_background': (
+        'Subagents in the background',
+        'Run every subagent detached from the turn, so the composer stays '
+        'usable while they work. AgentSwarm always blocks regardless.',
+        'agent-background'),
+    'agent_dock': (
+        'Subagent dock',
+        'A standing list of subagents under the composer, instead of a tree '
+        'that scrolls away. `all` also keeps the ones that just finished.',
+        'agent-dock'),
 }
 
 
@@ -812,6 +823,17 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
                                         'auto_accept_plan', 'input_box_border',
                                         'fullscreen', 'welcome_banner',
                                         'cron_drop_dir']),
+}
+
+# Patch switches that are drawn on a screen of their own rather than in a
+# group above. There is one, and it earns the exception: `agent_dock` is about
+# subagents, and the screen about subagents already exists — it is
+# `config-menu.py`'s "Subagent models", which otherwise only writes
+# `config.toml`. Listing it here keeps the selfcheck's real question intact,
+# which is not "is every switch in a group" but "can every switch be reached".
+SETTINGS_ELSEWHERE: dict[str, str] = {
+    'agent_dock': 'Subagent models',
+    'agent_background': 'Subagent models',
 }
 
 # tweakcc draws a two-state switch as a checkbox and everything else as its
@@ -1966,12 +1988,15 @@ def _selfcheck() -> int:
         # registered and invisible — the failure the old single screen could
         # not have and this split can.
         grouped = [k for _, keys in SETTING_GROUPS.values() for k in keys]
-        check('every registered switch is in a group',
-              set(grouped) == set(ps.DEFAULTS),
-              sorted(set(ps.DEFAULTS) ^ set(grouped)))
+        check('every registered switch is reachable',
+              set(grouped) | set(SETTINGS_ELSEWHERE) == set(ps.DEFAULTS),
+              sorted(set(ps.DEFAULTS) ^ (set(grouped) | set(SETTINGS_ELSEWHERE))))
         check('no switch is in two groups',
               len(grouped) == len(set(grouped)),
               [k for k in grouped if grouped.count(k) > 1])
+        check('a switch drawn elsewhere is not also in a group',
+              not (set(SETTINGS_ELSEWHERE) & set(grouped)),
+              sorted(set(SETTINGS_ELSEWHERE) & set(grouped)))
         check('every group is reachable from the root menu',
               set(SETTING_GROUPS) <= {i.key for i in items},
               sorted(set(SETTING_GROUPS) - {i.key for i in items}))

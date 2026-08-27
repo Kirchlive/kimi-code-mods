@@ -55,6 +55,14 @@ DEFAULTS = {
     'fullscreen': 'off',              # on | off
     'welcome_banner': 'on',           # on | off — the greeting and the horns
     'cron_drop_dir': 'off',           # on | off — adopt <sessionDir>/cron/*.json drops
+    # A standing list of subagents under the composer. `all` also keeps the
+    # ones that just finished, which is the half that overrides Kimi's own
+    # pruning of foreground-only records — see patches/82-agent-dock.js.
+    'agent_dock': 'off',              # off | running | all
+    # Whether a subagent runs detached from the turn. `always` forces it, so
+    # the composer stays usable while agents work — see
+    # patches/86-agent-background-default.js.
+    'agent_background': 'default',    # default | always
 }
 
 CHOICES = {
@@ -95,6 +103,8 @@ CHOICES = {
     'fullscreen': ['off', 'on'],
     'welcome_banner': ['off', 'on'],
     'cron_drop_dir': ['off', 'on'],
+    'agent_dock': ['off', 'running', 'all'],
+    'agent_background': ['default', 'always'],
 }
 
 # Four settings take a value no list can hold: the message marker, your own

@@ -51,6 +51,7 @@ KIMI_BIN = Path.home() / '.kimi-code' / 'bin' / 'kimi'
 sys.path.insert(0, str(HERE.resolve()))
 
 import menu as m                                             # noqa: E402
+import patch_settings as ps                                  # noqa: E402
 from menu import Item                                        # noqa: E402
 
 # TOML spellings. See the module docstring: these are snake_case on purpose.
@@ -1011,13 +1012,19 @@ def subagent_rules(section: dict, subagent_flag_on: bool) -> list[str]:
 
 
 def screen_subagent(st: Editing) -> m.Screen:
-    """Which model a subagent runs on.
+    """Which model a subagent runs on, and whether they are listed on screen.
 
-    This is tweakcc's "Subagent models" seen from Kimi's side, and it needs no
-    patch at all: `[secondary_model]` is a registered section in the live
-    engine. It is richer than tweakcc's per-agent-type list, too — a *pool* of
-    named models the main agent may pick from, or one model forced on every
-    subagent.
+    This is tweakcc's "Subagent models" seen from Kimi's side. The model half
+    needs no patch at all: `[secondary_model]` is a registered section in the
+    live engine. It is richer than tweakcc's per-agent-type list, too — a
+    *pool* of named models the main agent may pick from, or one model forced
+    on every subagent.
+
+    The last row is the exception, and the only one on this screen that does
+    not write `config.toml`: `agent_dock` belongs to patches/82-agent-dock.js
+    and is stored in `patch-settings.conf`. It sits here because it is about
+    subagents and this is the screen about subagents; the row says what it is,
+    so that "why did nothing change on restart" never has to be asked.
 
     Nothing here does anything until the `secondary-model` flag is on, which is
     why that state is the first thing the screen says. The flag lives in the
@@ -1092,6 +1099,28 @@ def screen_subagent(st: Editing) -> m.Screen:
         rows.append(Item('action', 'Add a pool model', lambda x: '', key='pool:add',
                          help='An alias from your model catalogue, plus a short '
                               'description the main agent sees.'))
+        # The only row on this screen that is not `config.toml`. It belongs
+        # here because it is about subagents and this is where they are set
+        # up, but it is a patch and says so: it takes effect on the next
+        # `Apply`, not on the next launch.
+        rows += [Item('sep'),
+                 Item('info', 'the row below is a patch, not a config key — '
+                              'it needs an Apply'),
+                 Item('cycle', 'agent_dock',
+                      lambda x: ps.get('agent_dock'),
+                      key='dock', choices=ps.CHOICES['agent_dock'],
+                      help='A standing list of subagents under the composer. '
+                           '`all` also keeps the ones that just finished.'),
+                 # Locked while the dock is on: a dock beside a frozen composer
+                 # shows you what you are waiting for and nothing else, so the
+                 # two settings would work against each other.
+                 (Item('info', 'agent_background   always  (durch agent_dock erzwungen)')
+                  if ps.get('agent_dock') != 'off' else
+                  Item('cycle', 'agent_background',
+                       lambda x: ps.get('agent_background'),
+                       key='bg', choices=ps.CHOICES['agent_background'],
+                       help='`always` detaches every subagent from the turn, so '
+                            'the composer stays usable. AgentSwarm still blocks.'))]
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -1161,6 +1190,13 @@ def screen_subagent(st: Editing) -> m.Screen:
     def cyc(s: Editing, item: Item, forward: bool) -> None:
         nonlocal message
         s.refresh()
+        if item.key == 'dock':
+            message = f'agent_dock = {ps.cycle("agent_dock", forward)} — apply to take effect'
+            return
+        if item.key == 'bg':
+            message = (f'agent_background = {ps.cycle("agent_background", forward)}'
+                       ' — apply to take effect')
+            return
         if item.key != 'force':
             return
         section = dict(s.data.get(S_SECONDARY) or {})

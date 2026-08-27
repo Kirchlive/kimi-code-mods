@@ -138,6 +138,9 @@ check $? 'an AppleDouble sidecar in patches/ is not executed'
 node "$HERE/lib/test_patches.mjs" >/dev/null 2>&1
 check $? 'patch runner contract (settings channel, no-op, failures)'
 
+node "$HERE/lib/test_agent_dock.mjs" >/dev/null 2>&1
+check $? 'agent dock (anchors, rows, pruning, caps)'
+
 echo
 echo 'auto-repatch guard:'
 bash "$HERE/lib/test_guard.sh" >/dev/null 2>&1

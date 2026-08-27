@@ -83,6 +83,9 @@ if (MODE === 'off') {
 }
 
 const MARK = '__kimi-code-modsEffort';
+// Hyphens in the project name mean dot notation would parse as subtraction;
+// every access below goes through brackets.
+const REF = 'globalThis["' + MARK + '"]';
 
 if (js.includes(MARK)) {
   throw new Error('already patched');
@@ -95,7 +98,7 @@ if (js.includes(MARK)) {
 // between them. The rank table is what makes `pin` a floor rather than a
 // second rule: levels are compared by their position in it.
 
-const ROUTER = 'globalThis.' + MARK + '=globalThis.' + MARK + '||{level:void 0,'
+const ROUTER = REF + '=' + REF + '||{level:void 0,'
   + 'pin:' + JSON.stringify(MODE === 'pin') + ','
   + 'rank:{off:0,minimal:1,low:2,medium:3,high:4,xhigh:5,max:6},'
   + 'route:function(t){'
@@ -118,7 +121,7 @@ const SEEN_ANCHOR = 'if (sanitized.length === 0) return void 0;\n'
 
 const SEEN_REPLACEMENT = 'if (sanitized.length === 0) return void 0;\n'
   + '\t' + ROUTER + '\n'
-  + '\ttry { globalThis.' + MARK + '.route(sanitized); } catch {}\n'
+  + '\ttry { ' + REF + '.route(sanitized); } catch {}\n'
   + '\treturn sanitized.slice(0, MAX_LAST_PROMPT_LENGTH);';
 
 let seen = js.split(SEEN_ANCHOR).length - 1;
@@ -142,7 +145,7 @@ const USE_ANCHOR = 'resolveThinkingEffort(requested, model) {\n'
   + 'model, this.strictThinkingValidation(model));';
 
 const USE_REPLACEMENT = 'resolveThinkingEffort(requested, model) {\n'
-  + '\t\t\tif (requested === void 0) { const r = globalThis.' + MARK + '; '
+  + '\t\t\tif (requested === void 0) { const r = ' + REF + '; '
   + 'if (r && r.level !== void 0) requested = r.level; }\n'
   + '\t\t\treturn resolveThinkingEffortForModel(requested, this.config.get(THINKING_SECTION), '
   + 'model, this.strictThinkingValidation(model));';
