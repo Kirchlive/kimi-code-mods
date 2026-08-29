@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # Draws the patched Kimi welcome box, for screenshotting into the README.
 #
-#   ./docs/banner.sh          # 84 columns, sized for a GitHub README
-#   ./docs/banner.sh 120      # wider, if you are cropping it yourself
+#   ./assets/banner.sh                # 84 columns, sized for a GitHub README
+#   ./assets/banner.sh 120            # wider, if you are cropping it yourself
+#   ./assets/banner.sh 84 1.40.0      # a different version in the picture
 #
 # This is a still life, not a live reading: the model and version shown are
 # placeholders picked for the picture, and nothing here asks Kimi anything. It
 # exists so the banner in the README can be reproduced exactly rather than
 # depending on someone's terminal, working directory and installed version.
 #
+# It sits beside `banner.jpeg` because that file is what it produces: screenshot
+# the output at the width you passed and replace the picture.
+#
 # WHY THE WIDTHS ARE WRITTEN DOWN
 # The logo rows contain quadrant blocks and triangles that `${#string}` counts
 # as one character each but which are not ASCII, and the shell has no notion of
 # display width. Each row therefore carries the number of columns it occupies,
 # measured once, so the padding is arithmetic rather than a guess. Change a
-# line and its number changes with it.
+# line and its number changes with it. The version row is the exception: it is
+# all ASCII, so it counts itself and any version string stays aligned.
 set -euo pipefail
 
 # Inner width, between the two verticals. The default is chosen for where this
@@ -27,6 +32,11 @@ set -euo pipefail
 # the whole image then scales down to fit — which shrinks the text along with
 # the background nobody wanted.
 W=${1:-84}
+
+# The release the picture claims to be. A tag rather than a reading: nothing
+# here can ask the installed binary, and the banner is a still life. Keep it in
+# step with the newest `v*` tag.
+V=${2:-1.39.1}
 
 # The project red, the one the menu and the banner share. Falls back to no
 # colour when the output is not a terminal, so piping this to a file gives
@@ -66,7 +76,7 @@ row 0 ''
 row 19 "$(label 'Directory:' '/Users')"
 row 13 "$(label 'Session:' '')"
 row 15 "$(label 'Model:' 'KX')"
-row 19 "$(label 'Version:' '1.00.0')"
+row $((13 + ${#V})) "$(label 'Version:' "$V")"
 row 0 ''
 rule '╰' '╯'
 echo
