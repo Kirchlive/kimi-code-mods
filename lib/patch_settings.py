@@ -24,14 +24,18 @@ DEFAULTS = {
     'suggestion_height': 'default',   # default | half | full
     'wd_command': 'off',              # on | off
     'click_cursor': 'off',            # on | off
+    # Whether releasing a mouse-drag selection copies it to the clipboard
+    # (OSC 52). `off` keeps the highlight and leaves the clipboard alone —
+    # see patches/89-copy-on-mark.js.
+    'copy_on_mark': 'on',             # on | off
     'agents_md_names': 'off',         # off | claude | all
     'read_line_numbers': 'on',        # on | off
-    'expanded_by_default': 'off',     # off | thinking | tools | both
-    'read_limits': 'default',         # default | moderate | large
+    'expanded_by_default': 'off',     # off | on
+    'read_limits': '1000',            # 500 | 1000 | 2000 | 5000 — 1000 is Kimi's own
     'auto_accept_plan': 'off',        # on | off
     'effort_router': 'off',           # off | pin | free
-    'spinner_style': 'default',       # default | a preset | custom
-    'spinner_mirror': 'off',          # on runs the frames forwards then back
+    'spinner_style': 'kimi-code-mods',  # kimi-code-mods | default | a preset | custom
+    'spinner_mirror': 'on',           # off runs the frames forwards only
     'spinner_interval_ms': 'default',  # default, or 20..2000
     'spinner_frames': 'default',      # the frames `custom` uses, space separated
     # The second spinner. Kimi turns the moon while it waits on the model or on
@@ -40,7 +44,7 @@ DEFAULTS = {
     # which is what the single setting used to do and therefore what an
     # existing patch-settings.conf still means.
     'working_style': 'follow',        # follow | default | a preset | custom
-    'working_mirror': 'off',          # on runs the frames forwards then back
+    'working_mirror': 'on',           # off runs the frames forwards only
     'working_frames': 'default',      # the frames `custom` uses, space separated
     'thinking_verbs': 'off',          # on | off
     'thinking_verbs_list': 'default',  # the words, comma separated
@@ -48,7 +52,8 @@ DEFAULTS = {
     'user_message_marker': 'default',  # default, or the prefix itself
     'user_message_border': 'off',     # off | round | single | double | bold | topbottom
     'user_message_style': 'default',  # default | plain | italic | dim | underline | strikethrough
-    'input_box_border': 'default',    # default | off | single | double | bold
+    'input_box_border': 'round',      # off | round | single | double | bold | topbottom
+    'input_box_prompt': 'default',    # default | none — the "> " and its indent
     # The alternate screen buffer. Kimi reads KIMI_CODE_TUI_FULL_SCREEN for
     # this, which only reaches it when it is started through a launcher that
     # exports the variable. As a patch it holds however Kimi is started.
@@ -59,35 +64,69 @@ DEFAULTS = {
     # ones that just finished, which is the half that overrides Kimi's own
     # pruning of foreground-only records — see patches/82-agent-dock.js.
     'agent_dock': 'off',              # off | running | all
+    # How many agents the dock shows at once. Free text in the file, cycled
+    # 1-10 in the menu — see patches/82-agent-dock.js.
+    'agent_dock_rows': '5',           # 1-20
     # Whether a subagent runs detached from the turn. `always` forces it, so
     # the composer stays usable while agents work — see
     # patches/86-agent-background-default.js.
     'agent_background': 'default',    # default | always | immediate
+    # A thinking block while it runs and what it leaves behind: `full` keeps
+    # it fully expanded forever, `keep` folds it to Kimi's three lines at the
+    # end — see patches/92-thinking-display.js.
+    'thinking_display': 'compact',      # compact | full | keep
+    # The @-file completion: Kimi's own plain list, or the wrapping list the
+    # slash commands have at half or nearly full height — see
+    # patches/90-at-file-suggestions.js and patches/20-suggestion-list-half-height.js.
+    'at_file_suggestions': 'default',  # default | half | full
+    # Where the context gauge sits: the footer's second line, or the row above
+    # the composer — see patches/91-context-position.js.
+    'context_position': 'bottom',     # bottom | top
+    # A prompt sent mid-turn steers the running turn at the next step boundary
+    # instead of queuing for a new one — see patches/95-steer-mid-turn.js.
+    'steer_mid_turn': 'off',          # on | off
+    # Colours for the text typed into the input box and the frame around your
+    # own messages — the input box frame itself is themed (`border` /
+    # `borderFocus` tokens), not patched. The menu cycles the named list; a
+    # #rrggbb value works from the file — see patches/94-colors.js.
+    'input_box_text_color': 'default',
+    'user_message_border_color': 'default',
+    # How the text typed into the input box is drawn — `default` is plain,
+    # Kimi's own — see patches/94-colors.js.
+    'input_box_style': 'default',     # default | plain | italic | dim | underline | strikethrough
+    # The tool-call headers: `bash_one_liner` shows the command itself instead
+    # of "Ran a command", `tool_call_used` keeps Kimi's Used/Using words —
+    # see patches/88-bash-one-liner.js.
+    'bash_one_liner': 'off',          # on | off
+    'tool_call_used': 'on',           # on | off
+    # The rotating hints in the status line — see patches/96-status-hints.js.
+    'status_hints': 'on',             # on | off
 }
 
 CHOICES = {
     'suggestion_height': ['default', 'half', 'full'],
     'wd_command': ['off', 'on'],
     'click_cursor': ['off', 'on'],
+    'copy_on_mark': ['on', 'off'],
     'agents_md_names': ['off', 'claude', 'all'],
     'read_line_numbers': ['on', 'off'],
-    'expanded_by_default': ['off', 'thinking', 'tools', 'both'],
-    'read_limits': ['default', 'moderate', 'large'],
+    'expanded_by_default': ['off', 'on'],
+    'read_limits': ['500', '1000', '2000', '5000'],
     'auto_accept_plan': ['off', 'on'],
     'effort_router': ['off', 'pin', 'free'],
-    'spinner_style': ['default', 'braille', 'dots', 'moon', 'blocks',
-                      'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
+    'spinner_style': ['kimi-code-mods', 'default', 'braille', 'dots', 'moon',
+                      'blocks', 'wave', 'glow', 'arc', 'star', 'custom'],
     'spinner_mirror': ['off', 'on'],
-    # `default` leads, the way it does on every other style list — Kimi's own
-    # answer first, then the ways to depart from it. `follow` is the value the
-    # setting starts on, which the note beside the row says; being second in
-    # the list does not make it less the default.
+    # `follow` leads because it is the value the setting starts on, with Kimi's
+    # own moon (`default`) behind it.
     # No `moon` here: `default` already is Kimi's moon, and offering the same
     # frames twice under two names asks the reader to spot that they are the
     # same. The patch still accepts `working_style = moon` from a file written
-    # by hand — it is the menu that has nothing to add by listing it.
-    'working_style': ['default', 'follow', 'braille', 'dots', 'blocks',
-                      'wave', 'glow', 'colors', 'arc', 'star', 'custom'],
+    # by hand — it is the menu that has nothing to add by listing it. `colors`
+    # is likewise still accepted; the menu names that set `kimi-code-mods`, the
+    # way the thinking list does.
+    'working_style': ['follow', 'default', 'kimi-code-mods', 'braille', 'dots',
+                      'blocks', 'wave', 'glow', 'arc', 'star', 'custom'],
     'working_mirror': ['off', 'on'],
     # A duration is a number, but only a handful of them are worth having: below
     # 40 ms the difference stops being visible and above 400 the spinner reads
@@ -99,13 +138,28 @@ CHOICES = {
     'user_message_border': ['off', 'round', 'single', 'double', 'bold', 'topbottom'],
     'user_message_style': ['default', 'plain', 'italic', 'dim', 'underline',
                            'strikethrough'],
-    'input_box_border': ['default', 'off', 'single', 'double', 'bold'],
+    'input_box_border': ['off', 'round', 'single', 'double', 'bold', 'topbottom'],
+    'input_box_prompt': ['default', 'none'],
     'fullscreen': ['off', 'on'],
     'welcome_banner': ['off', 'on'],
     'cron_drop_dir': ['off', 'on'],
     'agent_dock': ['off', 'running', 'all'],
+    'agent_dock_rows': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     'agent_background': ['default', 'always', 'immediate'],
+    'at_file_suggestions': ['default', 'half', 'full'],
+    'thinking_display': ['compact', 'full', 'keep'],
+    'context_position': ['bottom', 'top'],
+    'steer_mid_turn': ['on', 'off'],
+    'input_box_style': ['default', 'plain', 'italic', 'dim', 'underline',
+                        'strikethrough'],
+    'bash_one_liner': ['off', 'on'],
+    'tool_call_used': ['on', 'off'],
+    'status_hints': ['on', 'off'],
 }
+COLOR_CHOICES = ['default', 'red', 'green', 'yellow', 'blue', 'magenta',
+                 'cyan', 'white', 'gray']
+CHOICES['input_box_text_color'] = COLOR_CHOICES
+CHOICES['user_message_border_color'] = COLOR_CHOICES
 
 # Four settings take a value no list can hold: the message marker, your own
 # spinner frames, your own verbs and the format they are drawn in. They are

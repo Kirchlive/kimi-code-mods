@@ -90,6 +90,16 @@ if (MODE === 'off') {
   throw new Error('already patched');
 }
 
+// How many agents the dock shows at once. Free text in the settings file
+// (the menu cycles 1-10, wider lists are noise at footer height); anything
+// outside 1-20 or not a number is a typo, and a typo must not silently
+// change the layout.
+const ROWS_RAW = String(settings.get('agent_dock_rows', '5')).trim();
+const ROWS = /^\d+$/.test(ROWS_RAW) ? parseInt(ROWS_RAW, 10) : NaN;
+if (!Number.isInteger(ROWS) || ROWS < 1 || ROWS > 20) {
+  throw new Error(`agent_dock_rows must be a number from 1 to 20 - got "${ROWS_RAW}"`);
+}
+
 let out = js;
 
 function splice(label, anchor, replacement) {
@@ -118,8 +128,8 @@ if (out.includes('...kmodsAgentDock.lines(width)')) {
 // and either way the failure would surface as a blank footer rather than an
 // error. Cheaper to refuse now. This only fires for names we did not write —
 // our own are caught by the check above.
-for (const name of ['kmodsAgentDock', 'kmodsAgentDockNav', 'AGENT_DOCK_MODE', 'AGENT_DOCK_MAX_ROWS',
-                    'AGENT_DOCK_KEEP', 'AGENT_DOCK_TTL_MS']) {
+for (const name of ['kmodsAgentDock', 'kmodsAgentDockNav', 'kmodsDockHost', 'AGENT_DOCK_MODE', 'AGENT_DOCK_MAX_ROWS',
+                    'AGENT_DOCK_KEEP', 'AGENT_DOCK_TTL_MS', 'AGENT_DOCK_STOP_TTL_MS']) {
   if (out.includes(name)) {
     throw new Error(`the name ${name} is already taken in this bundle`);
   }
@@ -265,7 +275,15 @@ splice('the store\'s tool result',
   '\t\t\t\tif (record === void 0 || call === void 0) return;\n' +
   '\t\t\t\trecord.openCalls = Math.max(0, (record.openCalls ?? 1) - 1);\n' +
   '\t\t\t\trecord.lastResultAt = Date.now();\n' +
-  '\t\t\t\trecord.lastResultError = event.isError === true;');
+  '\t\t\t\trecord.lastResultError = event.isError === true;\n' +
+  '\t\t\t\tif (event.isError === true) {\n' +
+  '\t\t\t\t\tconst now = Date.now();\n' +
+  '\t\t\t\t\t// A failure inside an open window extends it and turns it into a\n' +
+  '\t\t\t\t\t// series; the first failure of a window holds solid.\n' +
+  '\t\t\t\t\trecord.failSolo = !(record.failUntil !== void 0 && now < record.failUntil);\n' +
+  '\t\t\t\t\tif (record.failSolo) record.failStart = now;\n' +
+  '\t\t\t\t\trecord.failUntil = now + AGENT_DOCK_FAIL_MS;\n' +
+  '\t\t\t\t}');
 
 // The tool count. `steps` is capped at twenty and cannot be counted after the
 // fact, so the tally is kept as it happens — once per call, on the branch that
@@ -298,6 +316,7 @@ splice('the store\'s streaming tool call',
   '\t\t\t\t\t\tstartedAt: Date.now()\n' +
   '\t\t\t\t\t};\n' +
   '\t\t\t\t\trecord.toolCount = (record.toolCount ?? 0) + 1;\n' +
+  '\t\t\t\t\trecord.lastCallAt = Date.now();\n' +
   '\t\t\t\t\trecord.lastResultAt = void 0;\n' +
   '\t\t\t\t\trecord.lastResultError = false;\n' +
   '\t\t\t\t\trecord.openCalls = (record.openCalls ?? 0) + 1;\n' +
@@ -314,6 +333,7 @@ splice('the store\'s tool.call.started case',
   '\t\t\t\tconst existing = this.findToolCall(record, event.toolCallId);\n' +
   '\t\t\t\tif (existing === void 0) {\n' +
   '\t\t\t\t\trecord.toolCount = (record.toolCount ?? 0) + 1;\n' +
+  '\t\t\t\t\trecord.lastCallAt = Date.now();\n' +
   '\t\t\t\t\trecord.lastResultAt = void 0;\n' +
   '\t\t\t\t\trecord.lastResultError = false;\n' +
   '\t\t\t\t\trecord.openCalls = (record.openCalls ?? 0) + 1;\n' +
@@ -451,6 +471,31 @@ const SWARM_GUARD =
   '\t\t\t}\n' +
   '\t\t}\n';
 
+// ------------------------------------------------------------- 2b. the badge
+//
+// The footer's own `[N agents running]` badge says what the dock shows in
+// full rows directly underneath it. Redundant at best, misleading at worst —
+// it counts background tasks while the dock also lists foreground ones.
+// The shared splice() cannot take this one: its early return tests
+// `includes(replacement)`, and an empty replacement is found everywhere —
+// which made this removal a silent no-op since the day it was written, badge
+// showing the whole time. Explicit checks instead.
+{
+  const BADGE =
+    '\t\tif (this.backgroundAgentCount > 0) {\n' +
+    '\t\t\tconst noun = this.backgroundAgentCount === 1 ? "agent" : "agents";\n' +
+    '\t\t\ttaskBadges.push(chalk.hex(colors.primary)(`[${String(this.backgroundAgentCount)} ${noun} running]`));\n' +
+    '\t\t}\n';
+  const n = out.split(BADGE).length - 1;
+  if (n === 0) {
+    throw new Error('the footer agent badge not found - the shape changed this release');
+  }
+  if (n !== 1) {
+    throw new Error(`the footer agent badge is not unique (${n}) - refusing to guess`);
+  }
+  out = out.replace(BADGE, () => '');
+}
+
 if (MODE === 'all') {
   splice('the foreground-record pruning',
     '\tpruneForegroundOnlyRecord(subagentId) {\n' +
@@ -479,10 +524,17 @@ if (MODE === 'all') {
 // the store, which is why the reference is guarded rather than assumed.
 const helpers =
   'var AGENT_DOCK_MODE = ' + JSON.stringify(MODE) + ';\n' +
-  'var AGENT_DOCK_MAX_ROWS = 5;\n' +
+  'var AGENT_DOCK_MAX_ROWS = ' + String(ROWS) + ';\n' +
   'var AGENT_DOCK_KEEP = 8;\n' +
   'var AGENT_DOCK_TTL_MS = 1e4;\n' +
+  '// A dock-stopped row lingers three seconds, not ten: you watched the stop,\n' +
+  '// the row only has to confirm it landed.\n' +
+  'var AGENT_DOCK_STOP_TTL_MS = 3e3;\n' +
   'var AGENT_DOCK_CYCLE_MS = 3e3;\n' +
+  '// How long a failure window lasts: the first failure holds solid red for\n' +
+  '// the whole window; each further failure inside it turns it into a series\n' +
+  '// (blink) and extends it.\n' +
+  'var AGENT_DOCK_FAIL_MS = 2e3;\n' +
 
   'var AGENT_DOCK_BAR_CELLS = 8;\n' +
   '// The unlit cell, the same character Kimi\'s own swarm bar rests on.\n' +
@@ -491,24 +543,22 @@ const helpers =
   '// match, and a count between two entries holds the lower frame until it\n' +
   '// reaches the next.\n' +
   '//\n' +
-  '// Drawn by hand rather than computed. A formula gives every frame the same\n' +
-  '// one-cell edge; these were chosen so the leading edge reads as a slope\n' +
-  '// that flattens as the bar fills — which sometimes takes two cells\n' +
-  '// (`\\u28F7\\u28C4` at six) and sometimes one. The last three frames keep the\n' +
-  '// eighth cell moving after the other seven are full, so a long run does not\n' +
-  '// look frozen.\n' +
+  '// Drawn by hand rather than computed. Every second step fills one whole\n' +
+  '// cell for the first four; from ten on a half cell (`\\u28C7`) marks the\n' +
+  '// leading edge between the full ones, so the bar keeps moving while the\n' +
+  '// steps between frames grow. The last frame lands at thirty.\n' +
   'var AGENT_DOCK_BAR_FRAMES = [\n' +
-  '\t{ from: 20, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28E7" },\n' +
-  '\t{ from: 14, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28E6" },\n' +
-  '\t{ from: 10, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C6" },\n' +
-  '\t{ from: 8,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28F7\\u28C4" },\n' +
-  '\t{ from: 7,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28E6\\u28C0" },\n' +
-  '\t{ from: 6,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28F7\\u28C4\\u28C0" },\n' +
-  '\t{ from: 5,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28F6\\u28C0\\u28C0" },\n' +
-  '\t{ from: 4,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C4\\u28C0\\u28C0" },\n' +
-  '\t{ from: 3,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28C4\\u28C0\\u28C0\\u28C0" },\n' +
-  '\t{ from: 2,  bar: "\\u28FF\\u28FF\\u28FF\\u28C4\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
-  '\t{ from: 1,  bar: "\\u28FF\\u28F7\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
+  '\t{ from: 30, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C7" },\n' +
+  '\t{ from: 27, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C0" },\n' +
+  '\t{ from: 24, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C7\\u28C0" },\n' +
+  '\t{ from: 21, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C0\\u28C0" },\n' +
+  '\t{ from: 16, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C7\\u28C0\\u28C0" },\n' +
+  '\t{ from: 13, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28FF\\u28C0\\u28C0\\u28C0" },\n' +
+  '\t{ from: 10, bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28C7\\u28C0\\u28C0\\u28C0" },\n' +
+  '\t{ from: 8,  bar: "\\u28FF\\u28FF\\u28FF\\u28FF\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
+  '\t{ from: 6,  bar: "\\u28FF\\u28FF\\u28FF\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
+  '\t{ from: 4,  bar: "\\u28FF\\u28FF\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
+  '\t{ from: 2,  bar: "\\u28FF\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" },\n' +
   '\t{ from: 0,  bar: "\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0\\u28C0" }\n' +
   '];\n' +
   'var kmodsAgentDock = {\n' +
@@ -516,6 +566,14 @@ const helpers =
   '\t*  Owned here rather than in the footer so a navigation patch can move it\n' +
   '\t*  without touching how the rows are drawn. */\n' +
   '\tselected: -1,\n' +
+  '\t/** Set when `s` stops an agent: the row takes a short "stopping" beat\n' +
+  '\t*  before the engine\'s own events turn it into `failed`. */\n' +
+  '\tstoppedAt: 0,\n' +
+  '\t/** Left edge of the sliding window over the records, in record indexes.\n' +
+  '\t*  Kept between renders so a repaint does not re-derive it and snap the\n' +
+  '\t*  list back under a resting cursor. Only meaningful while more records\n' +
+  '\t*  exist than rows fit. */\n' +
+  '\twindowStart: 0,\n' +
   '\t/** m:ss, and h:mm:ss once an agent has been at it for an hour. */\n' +
   '\telapsed(ms) {\n' +
   '\t\tconst total = Math.max(0, Math.floor(ms / 1e3));\n' +
@@ -535,12 +593,14 @@ const helpers =
   '\ttokens(n) {\n' +
   '\t\treturn `${String(Math.round(n / 1e3))}k`;\n' +
   '\t},\n' +
-  '\t/** The bar for a given tool count, coloured up to its leading edge:\n' +
+  '\t/** The bar for a given step count, coloured up to its leading edge:\n' +
   '\t*  everything through the last non-empty cell is lit, the rest is the\n' +
-  '\t*  dim ground it runs on. */\n' +
+  '\t*  dim ground it runs on. Steps, not tool calls: the loop marks its own\n' +
+  '\t*  progress in them, so the bar moves at the same pace for every agent\n' +
+  '\t*  instead of racing whoever shells out the most. */\n' +
   '\tbar(record) {\n' +
-  '\t\tconst tools = record.toolCount ?? 0;\n' +
-  '\t\tconst frame = (AGENT_DOCK_BAR_FRAMES.find((f) => tools >= f.from)\n' +
+  '\t\tconst steps = record.totalSteps ?? 0;\n' +
+  '\t\tconst frame = (AGENT_DOCK_BAR_FRAMES.find((f) => steps >= f.from)\n' +
   '\t\t\t?? AGENT_DOCK_BAR_FRAMES[AGENT_DOCK_BAR_FRAMES.length - 1]).bar;\n' +
   '\t\tlet edge = -1;\n' +
   '\t\tfor (let i = frame.length - 1; i >= 0; i--) {\n' +
@@ -554,34 +614,82 @@ const helpers =
   '\t\treturn currentTheme.dim("[") + (lit ? currentTheme.fg("success", lit) : "") +\n' +
   '\t\t\tcurrentTheme.dim(rest) + currentTheme.dim("]");\n' +
   '\t},\n' +
-  '\t/** The bullet, doubling as a state light rather than a blink.\n' +
-  '\t*  Four states, no timers: empty when idle, grey while a call is out,\n' +
-  '\t*  green on the last call coming back clean, red on it coming back bad.\n' +
-  '\t*  The colour flips the moment the event lands — a short call shows its\n' +
-  '\t*  colour for exactly as long as the next render takes, which is enough\n' +
-  '\t*  when the footer repaints on every event anyway. */\n' +
+  '\t/** The bullet as a true state light, with a clock where the state is\n' +
+  '\t*  time-shaped. Each row blinks on its own phase, anchored at the event\n' +
+  '\t*  that started the state — a global `now % period` would pulse every\n' +
+  '\t*  agent in lockstep, which reads as one light, not many.\n' +
+  '\t*\n' +
+  '\t*  Precedence, top first: terminal verdicts, the failure window, a call in\n' +
+  '\t*  flight (green blink 1200/500 from the call\'s start), between calls with\n' +
+  '\t*  the model at work (grey blink 1200/500 from the result), never-called-\n' +
+  '\t*  yet (hollow grey), and the quiet floor (hollow green). The hollow circle\n' +
+  '\t*  carries every colour the full one does — a blink\'s off-beat is the same\n' +
+  '\t*  state, not a lesser one. */\n' +
   '\tmarker(record) {\n' +
   '\t\tif (record.status === "completed") return currentTheme.fg("success", "\\u2713 ");\n' +
   '\t\tif (record.status === "failed") return currentTheme.fg("error", "\\u2717 ");\n' +
-  '\t\tif (record.lastResultError === true) return currentTheme.fg("error", "\\u25CF ");\n' +
-  '\t\tif (record.lastResultAt !== void 0) return currentTheme.fg("success", "\\u25CF ");\n' +
-  '\t\tif ((record.openCalls ?? 0) > 0) return currentTheme.dim("\\u25CF ");\n' +
-  '\t\treturn currentTheme.fg("primary", "\\u25EF ");\n' +
+  '\t\tconst now = Date.now();\n' +
+  '\t\tconst full = "\\u25CF ";\n' +
+  '\t\tconst open = "\\u25EF ";\n' +
+  '\t\tif (record.failUntil !== void 0 && now < record.failUntil) {\n' +
+  '\t\t\tif (record.failSolo === true) return currentTheme.fg("error", full);\n' +
+  '\t\t\tconst t = now - (record.failStart ?? now);\n' +
+  '\t\t\treturn t % 1000 < 500 ? currentTheme.fg("error", full) : currentTheme.fg("error", open);\n' +
+  '\t\t}\n' +
+  '\t\tif ((record.openCalls ?? 0) > 0) {\n' +
+  '\t\t\tconst t = now - (record.lastCallAt ?? now);\n' +
+  '\t\t\treturn t % 1700 < 1200 ? currentTheme.fg("success", full) : currentTheme.fg("success", open);\n' +
+  '\t\t}\n' +
+  '\t\tif (record.lastResultAt !== void 0) {\n' +
+  '\t\t\tconst t = now - record.lastResultAt;\n' +
+  '\t\t\treturn t % 1700 < 1200 ? currentTheme.dim(full) : currentTheme.dim(open);\n' +
+  '\t\t}\n' +
+  '\t\tif ((record.toolCount ?? 0) === 0) return currentTheme.dim(open);\n' +
+  '\t\treturn currentTheme.fg("success", open);\n' +
   '\t},\n' +
-  '\t/** The subject of a tool call, in one word: the file it touches, the\n' +
-  '\t*  program it runs, the pattern it looks for. */\n' +
+  '\t/** The subject of a tool call: the file it touches, the program it runs,\n' +
+  '\t*  the pattern it looks for. Paths keep their tail — the segments that\n' +
+  '\t*  actually identify the file — and shed leading ones when long. Shell\n' +
+  '\t*  commands shrink in steps: paths first, the `cd … &&` lead-in next,\n' +
+  '\t*  trailing arguments last. */\n' +
   '\tsubject(args) {\n' +
   '\t\tif (args === void 0 || args === null) return "";\n' +
   '\t\tfor (const key of ["file_path", "path", "pattern", "command", "url", "query", "description"]) {\n' +
   '\t\t\tconst raw = args[key];\n' +
   '\t\t\tif (typeof raw !== "string" || raw.length === 0) continue;\n' +
-  '\t\t\t// A shell command says what it does in its first two words —\n' +
-  '\t\t\t// `git status`, `npm test`. Only the program name would leave the\n' +
-  '\t\t\t// row saying `Bash git`, which is barely more than `Bash`.\n' +
-  '\t\t\tconst head = key === "command" ? raw.trim().split(/\\s+/).slice(0, 2).join(" ") : raw;\n' +
-  '\t\t\treturn head;\n' +
+  '\t\t\tif (key === "command") return this.commandTail(raw);\n' +
+  '\t\t\tif (key === "file_path" || key === "path") return this.pathTail(raw);\n' +
+  '\t\t\treturn raw;\n' +
   '\t\t}\n' +
   '\t\treturn "";\n' +
+  '\t},\n' +
+  '\t/** A path with its tail kept: `/\u2026/src/cmd/clui/main.go` rather than\n' +
+  '\t*  `/Users/rob/Development/\u2026`. Leading segments go first, one at a time,\n' +
+  '\t*  until what is left fits. */\n' +
+  '\tpathTail(raw, max = 40) {\n' +
+  '\t\tif (raw.length <= max) return raw;\n' +
+  '\t\tconst segs = raw.split("/").filter(Boolean);\n' +
+  '\t\tif (segs.length <= 2) return raw;\n' +
+  '\t\tlet keep = segs.length - 1;\n' +
+  '\t\twhile (keep > 1 && ("/\u2026/" + segs.slice(-keep).join("/")).length > max) keep--;\n' +
+  '\t\treturn "/\u2026/" + segs.slice(-keep).join("/");\n' +
+  '\t},\n' +
+  '\t/** A shell command, shortened in steps rather than cut mid-token:\n' +
+  '\t*  full → long path tokens tailed → `cd <dir> && ` off → trailing\n' +
+  '\t*  arguments off, rightmost first, down to the bare command. The row\n' +
+  '\t*  fitter takes over from whatever step still does not fit. */\n' +
+  '\tcommandTail(raw) {\n' +
+  '\t\tconst trimmed = raw.trim();\n' +
+  '\t\tif (trimmed.length <= 56) return trimmed;\n' +
+  '\t\tconst tokens = trimmed.split(/\\s+/);\n' +
+  '\t\tconst tailed = tokens.map((t) => t.includes("/") ? this.pathTail(t, 24) : t).join(" ");\n' +
+  '\t\tif (tailed.length <= 56) return tailed;\n' +
+  '\t\tconst cdMatch = tailed.match(/^cd\\s+\\S+\\s*&&\\s*/);\n' +
+  '\t\tconst noCd = cdMatch ? tailed.slice(cdMatch[0].length) : tailed;\n' +
+  '\t\tif (noCd.length <= 56) return noCd;\n' +
+  '\t\tconst words = noCd.split(/\\s+/);\n' +
+  '\t\twhile (words.length > 3 && words.join(" ").length > 56) words.pop();\n' +
+  '\t\treturn words.join(" ");\n' +
   '\t},\n' +
   '\t/** What the agent is doing right now, as `where what`.\n' +
   '\t*\n' +
@@ -647,6 +755,9 @@ const helpers =
   '\t\t\t}\n' +
   '\t\t\tif (target === void 0) break;\n' +
   '\t\t\ttarget.text = `${target.text.slice(0, target.text.length - 2).trimEnd()}\\u2026`;\n' +
+  '\t\t\t// A pre-rendered field would keep its old text under the new one —\n' +
+  '\t\t\t// drop it, so the row re-renders from the shortened text.\n' +
+  '\t\t\ttarget.rendered = void 0;\n' +
   '\t\t\tconst attempt = render(tightest);\n' +
   '\t\t\tif (attempt.width <= width) return attempt.out;\n' +
   '\t\t}\n' +
@@ -704,13 +815,23 @@ const helpers =
   '\t\t\t// A cohort with someone still working waits for them.\n' +
   '\t\t\tif (record.dockAlone !== true && busy.has(record.dockGroup)) return true;\n' +
   '\t\t\tconst since = record.dockAlone === true ? record.endedAt : (lastEnd.get(record.dockGroup) ?? record.endedAt);\n' +
-  '\t\t\treturn now - since <= AGENT_DOCK_TTL_MS;\n' +
+  '\t\t\t// An agent stopped from the dock leaves on its own short clock:\n' +
+  '\t\t\t// the stop was seen happening, so the row only has to confirm it.\n' +
+  '\t\t\treturn now - since <= (record.dockStopped === true ? AGENT_DOCK_STOP_TTL_MS : AGENT_DOCK_TTL_MS);\n' +
   '\t\t});\n' +
   '\t},\n' +
+  '\t/** The agent\'s own description, at most two words — enough to tell\n' +
+  '\t*  "Explore documents" from "Write docs" without paying for the sentence\n' +
+  '\t*  it came from. */\n' +
+  '\ttwoWords(text) {\n' +
+  '\t\tif (typeof text !== "string" || text.length === 0) return "";\n' +
+  '\t\treturn text.trim().split(/\\s+/).slice(0, 2).join(" ");\n' +
+  '\t},\n' +
   '\t/** One agent:\n' +
-  '\t*  indicator bar name #N · model · effort · N tools · Nk · m:ss · task\n' +
-  '\t*  The bar sits left, right after the indicator, so all rows share the\n' +
-  '\t*  same left edge for the bar and can be compared at a glance. */\n' +
+  '\t*  [❯] indicator elapsed bar name #N · model · effort · N tools · Nk · desc · task\n' +
+  '\t*  The bar (or the verdict bracket, once done) sits at a fixed left edge,\n' +
+  '\t*  so rows can be compared at a glance; the task ends the line and is the\n' +
+  '\t*  first field to shrink. */\n' +
   '\tline(record, width, selected = false, ordinal = 0) {\n' +
   '\t\tconst name = (record.agentName ?? "agent") + ` #${String(Math.max(1, ordinal))}`;\n' +
   '\t\tconst fields = [{\n' +
@@ -728,21 +849,32 @@ const helpers =
   '\t\tfields.push({ text: `${String(toolCount)} tool${toolCount === 1 ? "" : "s"}` });\n' +
   '\t\tconst tokens = record.contextTokens && record.contextTokens > 0 ? record.contextTokens : record.usageTokens ?? 0;\n' +
   '\t\tif (tokens > 0) fields.push({ text: this.tokens(tokens) });\n' +
-  '\t\tif (record.startedAt !== void 0) fields.push({ text: this.elapsed((record.endedAt ?? Date.now()) - record.startedAt) });\n' +
+  '\t\tconst desc = this.twoWords(record.description);\n' +
+  '\t\tif (desc) fields.push({ text: desc });\n' +
   '\t\t// Task last — it is the longest field and the first to be trimmed.\n' +
-  '\t\t// A finished agent with no task reads "idle" rather than nothing.\n' +
+  '\t\t// The tool name wears the primary colour, the way the same call does\n' +
+  '\t\t// in the transcript; its subject stays dim. A finished agent with no\n' +
+  '\t\t// task reads "idle" rather than nothing.\n' +
   '\t\tconst task = this.task(record);\n' +
-  '\t\tif (task) fields.push({ text: task, shrink: true });\n' +
-  '\t\telse if (record.status !== "running") fields.push({ text: "idle" });\n' +
-  '\t\t// Completed/failed verdict as a field, not a right-aligned block.\n' +
-  '\t\tif (record.status === "completed") fields.push({ text: "[Finished]", rendered: currentTheme.fg("success", "[Finished]") });\n' +
-  '\t\tif (record.status === "failed") fields.push({ text: "[Failed]", rendered: currentTheme.fg("error", "[Failed]") });\n' +
-  '\t\tconst head = selected ? currentTheme.fg("primary", "\\u276F ") : this.marker(record);\n' +
-  '\t\t// The bar sits left, right after the indicator, so all rows share the\n' +
-  '\t\t// same left edge for the bar and can be compared at a glance.\n' +
-  '\t\tconst barStr = record.status === "running" ? this.bar(record) + " " : "";\n' +
-  '\t\tconst prefix = "  " + head + barStr;\n' +
-  '\t\tconst prefixWidth = 2 + 2 + (record.status === "running" ? AGENT_DOCK_BAR_CELLS + 2 + 1 : 0);\n' +
+  '\t\tif (task) {\n' +
+  '\t\t\tconst sp = task.indexOf(" ");\n' +
+  '\t\t\tconst rendered = sp === -1 ? currentTheme.fg("primary", task)\n' +
+  '\t\t\t\t: currentTheme.fg("primary", task.slice(0, sp)) + " " + currentTheme.dim(task.slice(sp + 1));\n' +
+  '\t\t\tfields.push({ text: task, shrink: true, rendered });\n' +
+  '\t\t} else if (record.status !== "running") fields.push({ text: "idle" });\n' +
+  '\t\t// The selector owns the leftmost cell at a fixed two columns, so a row\n' +
+  '\t\t// never shifts when it gains focus: a selected one reads ❯ ●, an\n' +
+  '\t\t// unselected one keeps the same width with two spaces.\n' +
+  '\t\tconst sel = selected ? currentTheme.dim("\\u276F ") : "  ";\n' +
+  '\t\tconst time = record.startedAt !== void 0 ? this.elapsed((record.endedAt ?? Date.now()) - record.startedAt) + " " : "";\n' +
+  '\t\t// Bar position: the bar while running, the verdict bracket once done —\n' +
+  '\t\t// same edge, same width, the whole verdict dimmed like the bar\'s own.\n' +
+  '\t\tlet mid;\n' +
+  '\t\tif (record.status === "completed") mid = currentTheme.dim("[Finished]") + " ";\n' +
+  '\t\telse if (record.status === "failed") mid = currentTheme.dim("[") + currentTheme.fg("error", "Failed") + currentTheme.dim("]") + "   ";\n' +
+  '\t\telse mid = this.bar(record) + " ";\n' +
+  '\t\tconst prefix = sel + this.marker(record) + time + mid;\n' +
+  '\t\tconst prefixWidth = 2 + 2 + visibleWidth(time) + AGENT_DOCK_BAR_CELLS + 2 + 1;\n' +
   '\t\tconst room = Math.max(0, width - prefixWidth);\n' +
   '\t\tconst left = this.fit(fields, room);\n' +
   '\t\treturn truncateToWidth(prefix + left, width);\n' +
@@ -766,29 +898,32 @@ const helpers =
   '\t\tconst records = this.records();\n' +
   '\t\tif (records.length === 0) {\n' +
   '\t\t\tthis.selected = -1;\n' +
+  '\t\t\tthis.windowStart = 0;\n' +
   '\t\t\treturn [];\n' +
   '\t\t}\n' +
   '\t\tif (selected >= records.length) selected = records.length - 1;\n' +
   '\t\tlet shown = records;\n' +
-  '\t\tlet page = 0;\n' +
-  '\t\tlet pages = 1;\n' +
   '\t\tlet firstIndex = 0;\n' +
   '\t\tif (records.length > AGENT_DOCK_MAX_ROWS) {\n' +
-  '\t\t\tpages = Math.ceil(records.length / AGENT_DOCK_MAX_ROWS);\n' +
-  '\t\t\tpage = selected >= 0\n' +
-  '\t\t\t\t? Math.floor(selected / AGENT_DOCK_MAX_ROWS) % pages\n' +
-  '\t\t\t\t: Math.floor(Date.now() / AGENT_DOCK_CYCLE_MS) % pages;\n' +
-  '\t\t\t// With a row selected the page follows the selection and the clock\n' +
-  '\t\t\t// is ignored — a list that keeps turning under a cursor cannot be\n' +
-  '\t\t\t// aimed at, and the arrow keys are for aiming.\n' +
-  '\t\t\t//\n' +
-  '\t\t\t// The last page is pinned to the end rather than left short: a\n' +
-  '\t\t\t// dock that shrinks to one row for three seconds reads as a\n' +
-  '\t\t\t// glitch. Pages overlap slightly instead, and every agent is\n' +
-  '\t\t\t// still reached.\n' +
-  '\t\t\tconst start = Math.min(page * AGENT_DOCK_MAX_ROWS, records.length - AGENT_DOCK_MAX_ROWS);\n' +
-  '\t\t\tshown = records.slice(start, start + AGENT_DOCK_MAX_ROWS);\n' +
-  '\t\t\tfirstIndex = start;\n' +
+  '\t\t\t// A sliding window, not pages. With a cursor the window follows it\n' +
+  '\t\t\t// one row at a time — the arrow stays on the bottom row while the\n' +
+  '\t\t\t// list scrolls under it, instead of jumping a whole page and\n' +
+  '\t\t\t// landing the cursor two rows up. Without a cursor the window is\n' +
+  '\t\t\t// driven by the clock, as before: the footer already repaints\n' +
+  '\t\t\t// while agents work, so nothing has to be ticked. The window is\n' +
+  '\t\t\t// remembered between renders so a repaint without a keypress does\n' +
+  '\t\t\t// not snap back to wherever the selection arithmetic would put it.\n' +
+  '\t\t\tconst maxStart = records.length - AGENT_DOCK_MAX_ROWS;\n' +
+  '\t\t\tif (selected >= 0) {\n' +
+  '\t\t\t\tif (selected < this.windowStart) this.windowStart = selected;\n' +
+  '\t\t\t\telse if (selected >= this.windowStart + AGENT_DOCK_MAX_ROWS) this.windowStart = selected - AGENT_DOCK_MAX_ROWS + 1;\n' +
+  '\t\t\t} else {\n' +
+  '\t\t\t\tconst pages = Math.ceil(records.length / AGENT_DOCK_MAX_ROWS);\n' +
+  '\t\t\t\tthis.windowStart = Math.min(Math.floor(Date.now() / AGENT_DOCK_CYCLE_MS) % pages * AGENT_DOCK_MAX_ROWS, maxStart);\n' +
+  '\t\t\t}\n' +
+  '\t\t\tthis.windowStart = Math.max(0, Math.min(this.windowStart, maxStart));\n' +
+  '\t\t\tshown = records.slice(this.windowStart, this.windowStart + AGENT_DOCK_MAX_ROWS);\n' +
+  '\t\t\tfirstIndex = this.windowStart;\n' +
   '\t\t}\n' +
   '\t\t// No `main` row: it names the agent you are already talking to and\n' +
   '\t\t// costs a line saying so. Where the pages stand goes on the last row\n' +
@@ -816,13 +951,16 @@ const helpers =
   '\t\t// A footer line, the way Claude Code carries one: what is off screen,\n' +
   '\t\t// and which keys apply here. A list that quietly swaps itself out\n' +
   '\t\t// reads as a fault, and keys nobody names are keys nobody presses.\n' +
-  '\t\t// It costs a row, so it appears only when it has something to say —\n' +
-  '\t\t// which is never in the ordinary case of a few agents and no cursor.\n' +
-  '\t\tconst hidden = records.length - shown.length;\n' +
+  '\t\t// It costs a row, so it appears only when it has something to say.\n' +
+  '\t\t// The count is what is hidden *below* the window: rows above are\n' +
+  '\t\t// where the cursor came from, rows below are where ↓ still goes.\n' +
+  '\t\t// The key legend rides on every dock that has records at all — a\n' +
+  '\t\t// hidden legend reads as "no agent there", which is never true when\n' +
+  '\t\t// this line renders.\n' +
+  '\t\tconst hiddenBelow = records.length - (firstIndex + shown.length);\n' +
   '\t\tconst notes = [];\n' +
-  '\t\tif (hidden > 0) notes.push(`\\u2193 ${String(hidden)} more  ${String(page + 1)}/${String(pages)}`);\n' +
-  '\t\tif (selected >= 0) notes.push("\\u2191\\u2193 select \\u00B7 enter view \\u00B7 esc back");\n' +
-  '\t\telse if (hidden > 0) notes.push("\\u2191\\u2193 select");\n' +
+  '\t\tif (hiddenBelow > 0) notes.push(`\\u2193 ${String(hiddenBelow)} more`);\n' +
+  '\t\tnotes.push("\\u2191\\u2193 select \\u00B7 enter view \\u00B7 ctrl+k stop \\u00B7 esc back");\n' +
   '\t\tif (notes.length > 0) rows.push(truncateToWidth(currentTheme.dim(`  ${notes.join("  \\u00B7  ")}`), width));\n' +
   '\t\treturn rows;\n' +
   '\t}\n' +
@@ -901,6 +1039,36 @@ splice('the dock object',
   '\t\tkmodsAgentDock.selected = -1;\n' +
   '\t\treturn true;\n' +
   '\t},\n' +
+  '\t/** Stop the highlighted agent. Foreground ones go through their turn\n' +
+  '\t*  cancel, background ones through the task registry — the same two\n' +
+  '\t*  paths /btw and the tasks browser use. The row stays: the dock shows\n' +
+  '\t*  the kill as `✗ [Failed]` like any other ended agent, and the\n' +
+  '\t*  selection moves nowhere, so a second `s` cannot hit the wrong row. */\n' +
+  '\tstop(host) {\n' +
+  '\t\tconst record = this.selectedRecord();\n' +
+  '\t\tif (record === void 0 || record.status !== "running") return false;\n' +
+  '\t\tconst session = host?.session;\n' +
+  '\t\tif (session === void 0) return false;\n' +
+  '\t\tlet taskId;\n' +
+  '\t\tfor (const info of host.backgroundTasks?.values() ?? []) {\n' +
+  '\t\t\tif (info.kind === "agent" && info.agentId === record.agentId) { taskId = info.taskId; break; }\n' +
+  '\t\t}\n' +
+  '\t\tif (taskId !== void 0) {\n' +
+  '\t\t\tsession.stopBackgroundTask(taskId, { reason: "Stopped from the agent dock" }).catch(() => {});\n' +
+  '\t\t} else if (host.harness !== void 0 && typeof host.harness.withInteractiveAgent === "function") {\n' +
+  '\t\t\thost.harness.withInteractiveAgent(record.agentId, () => session.cancel()).catch(() => {});\n' +
+  '\t\t}\n' +
+  '\t\t// The engine\'s own events will mark the record failed when the kill\n' +
+  '\t\t// settles. Until then the dock says so itself — and the row leaves\n' +
+  '\t\t// after three seconds instead of the usual ten, because a stop you\n' +
+  '\t\t// ordered needs no linger.\n' +
+  '\t\trecord.status = "failed";\n' +
+  '\t\trecord.endedAt = Date.now();\n' +
+  '\t\trecord.dockStopped = true;\n' +
+  '\t\tkmodsAgentDock.stoppedAt = record.endedAt;\n' +
+  '\t\thost.state.ui.requestRender();\n' +
+  '\t\treturn true;\n' +
+  '\t},\n' +
   '\tselectedRecord() {\n' +
   '\t\tconst records = kmodsAgentDock.records();\n' +
   '\t\tif (kmodsAgentDock.selected < 0 || kmodsAgentDock.selected >= records.length) return void 0;\n' +
@@ -939,8 +1107,11 @@ splice('the dock object',
   'var kmodsAgentDock = {\n');
 
 // ------------------------------------------------------------------ the keys
-splice('the empty-composer down arrow',
+// `handleInput` sits on the editor, the host one scope up — the stop key
+// needs both, so the composer setup parks the host on the editor itself.
+splice('the dock host hand-off',
   '\t\teditor.onDownArrowEmpty = () => host.btwPanelController.scroll("down");',
+  '\t\teditor.kmodsDockHost = host;\n' +
   '\t\teditor.onDownArrowEmpty = () => {\n' +
   '\t\t\tif (kmodsAgentDockNav.down()) {\n' +
   '\t\t\t\thost.state.ui.requestRender();\n' +
@@ -970,6 +1141,22 @@ splice('the composer submit',
   '\t\t\t\tkmodsAgentDockNav.clear();\n' +
   '\t\t\t\tif (opened) return;\n' +
   '\t\t\t}');
+
+// `ctrl+k` stops the highlighted agent. It lives at the top of `handleInput`
+// rather than on a named handler — Kimi gives the composer no plain-letter
+// hook, and the key only exists while the composer is empty and a row is
+// selected, so it can never eat input meant as text. Not a bare letter:
+// `s` collides with typing the moment the composer has content, `ctrl+s`
+// already belongs to Kimi (`editor.onCtrlS`), and `ctrl+t` toggles the todo
+// list (`onToggleTodoExpand`). `ctrl+k` is free and carries the association.
+splice('the composer stop key',
+  '\thandleInput(data) {\n' +
+  '\t\tconst normalized = normalizeCapsLockedCtrl(data);',
+  '\thandleInput(data) {\n' +
+  '\t\tconst normalized = normalizeCapsLockedCtrl(data);\n' +
+  '\t\tif (typeof kmodsAgentDockNav !== "undefined" && kmodsAgentDock.selected >= 0 &&\n' +
+  '\t\t\t\tthis.getText() === "" && matchesKey(normalized, Key.ctrl("k")) &&\n' +
+  '\t\t\t\tkmodsAgentDockNav.stop(this.kmodsDockHost)) return;');
 
 // `onEscape` is a void handler — every branch of it ends in a bare `return`,
 // so this one does too rather than inventing a boolean the caller never reads.

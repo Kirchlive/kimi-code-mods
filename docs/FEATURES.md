@@ -75,6 +75,8 @@ beobachtet · `offen` noch nicht gebaut.
 57. Swarm als Hintergrund-Task  | patches/87-swarm-background.js             | done
 58. Patch-Nachweis im Binary    | run-patches.mjs --verify, kimi-patch.sh    | done
 59. Lauf-Protokoll + Delta      | .work/last-apply.log, state.json last_run  | done
+60. Bash-Kommando im Header     | patches/88-…, bash_one_liner=on            | ungetestet
+61. Auswahl per Taste kopieren  | patches/89-…, ctrl+c und cmd+c, immer an   | ungetestet
 ```
 
 Zeile 36 läuft im installierten Binary: `AGENTS_MD_PLAIN_NAMES = ["AGENTS.md",
@@ -316,3 +318,24 @@ Deltas zum Vorlauf aus `state.json → last_run`. Am Ende nennt `lsof` laufende
 `kimi`-Prozesse auf dem alten Inode mit PID und Startzeit — der pauschale
 Satz „Restart Kimi" stand schon da, als zwei Sessions auf dem Vorpatch-Binary
 liefen und niemand es merkte.
+
+**60** — Der Header las `toolCall.args["command"]`. Waehrend des Streamings
+kommt `args` aus `parseStreamingArgs`, dessen Fallback-Regex das schliessende
+Anfuehrungszeichen des Wertes braucht — `command` ist also erst da, wenn das
+Modell den ganzen Befehl ausgegeben hat, bei einem langen Einzeiler ueber eine
+Sekunde spaeter. `extractPartialStringField` liest den unfertigen JSON-String
+mit, so wie Kimis eigener `$ `-Block es immer tat; der Header faellt jetzt
+darauf zurueck und malt ab dem ersten Delta mit.
+
+**61** — Kimi faengt die Maus ab, also sieht das Terminal die Markierung nie
+und seine eigene Kopierfunktion greift ins Leere. Die eingebaute Bindung
+`tui.input.copy` (ctrl+c) war verdrahtet, aber tot: der Editor schluckt die
+Taste und sonst reagierte niemand. Der Handler haengt jetzt in
+`handleViewportInput`, der vor dem fokussierten Editor laeuft, und zwar
+unabhaengig von `copy_on_mark` — vorher gab es bei `on` gar keine
+Tastenkopie. Er konsumiert die Taste nur, wenn eine Auswahl da ist, sonst
+behaelt ctrl+c seine Interrupt-Bedeutung. Cmd+C ist derselbe Pfad:
+`matchesKey` versteht den Super-Modifier und Kitty-CSI-u, also reicht
+`defaultKeys: ["ctrl+c", "super+c"]`. Es kommt nur an, wo das Terminal Cmd+C
+weiterreicht (cmux mit Kitty-Protokoll sendet `CSI 99;9u`); Terminal.app und
+iTerm2 ohne das Protokoll fangen die Taste selbst ab.

@@ -158,10 +158,10 @@ the binary.
 | Working directory /wd | `off` `on` | Adds a `/wd` command that starts a session in another directory. |
 | Click to position cursor | `off` `on` | Place the cursor in the composer with a mouse click. Fullscreen only. |
 | Line numbers in Read | `on` `off` | Off saves tokens on every read, and costs the model the ability to cite a line. |
-| Expanded by default | `off` `thinking` `tools` `both` | Show thinking blocks and tool output unfolded. Costs screen, not tokens. |
+| Expanded by default | `off` `on` | Show tool output unfolded. Costs screen, not tokens. Thinking blocks are the Show Thinking Text switch. |
 | Read limits | `default` `moderate` `large` | How much one Read returns. Higher trades round trips for context. |
 | Auto-accept plans | `off` `on` | Skip the plan approval prompt. A multi-option plan then has no option chosen. |
-| Composer border | `default` `off` `single` `double` `bold` | The frame around the input box. |
+| Input box border | `off` `round` `single` `double` `bold` `topbottom` | The frame around the input box. |
 | Fullscreen renderer | `off` `on` | The alternate screen buffer, patched into the binary so it holds however Kimi is started — not only through a launcher that exports an environment variable. |
 | Welcome banner | `off` `on` | Greet with *Welcome to Kimi Code Mods!* and give the logo its horns. |
 

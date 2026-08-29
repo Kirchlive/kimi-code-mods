@@ -330,8 +330,9 @@ def build_items(st: State) -> list[Item]:
                 (n for n in (s.feature_note(p) for p in patches) if n), '')
         return value_note(value_fn or switches(group), at_default(*keys), live)
 
-    # The order is tweakcc's, so that muscle memory carries over from it: the
-    # appearance settings first, then the model and routing ones, then Kimi's
+    # General leads on the user's request; the order after it is tweakcc's,
+    # so that muscle memory carries over from it: the appearance settings
+    # first, then the model and routing ones, then Kimi's
     # own configuration, and the doors out at the bottom. Two tweakcc entries
     # have nothing behind them here — Fable plan mode and Better Claude in
     # Chrome are Claude-only — and their places are taken by the two settings
@@ -342,6 +343,8 @@ def build_items(st: State) -> list[Item]:
     # explanations, off the end of the line. What the row you are on is *for*
     # is the thing worth saying, and it is said on the row itself.
     items = [
+        Item('submenu', 'General', key='misc',
+             help='The switches that belong to no group of their own.'),
         Item('submenu', 'Themes', key='themes',
              help='Modify Kimi Code\'s built-in themes or create your own.'),
         Item('submenu', 'Thinking verbs', key='verbs',
@@ -353,11 +356,12 @@ def build_items(st: State) -> list[Item]:
                   'while it thinks.'),
         Item('submenu', 'User message display', key='usermsg',
              help='How your own messages are drawn in the transcript.'),
-        Item('submenu', 'Misc', key='misc',
-             help='The switches that belong to no group of their own.'),
+        Item('submenu', 'Output', key='output',
+             help='What a turn draws: tool-call headers, thinking blocks, '
+                  'line numbers, folding.'),
         Item('submenu', 'Toolsets', key='toolsets',
              help='Named lists of disabled tools, applied in one keystroke.'),
-        Item('submenu', 'Subagent models', key='subagent',
+        Item('submenu', 'Subagent', key='subagent',
              help='Which model a subagent runs on, and whether they are '
                   'listed under the composer.'),
         Item('submenu', 'Complexity effort router', key='router',
@@ -704,23 +708,36 @@ PATCH_HELP = {
         'Command suggestions',
         'Height of the slash-command list: Kimi\'s five, half the window, or nearly full.', 'suggestion'),
     'wd_command': (
-        'Working directory /wd',
+        'Change working directory',
         'Adds a /wd slash command that starts a session in another directory.', 'wd'),
     'click_cursor': (
-        'Click to position cursor',
+        'Click cursor position',
         'Place the cursor in the composer with a mouse click. Fullscreen only.', 'click'),
+    'copy_on_mark': (
+        'Copy on mark',
+        'Copy a mouse-drag selection to the clipboard when the button is '
+        'released. off keeps the highlight and leaves the clipboard alone. '
+        'ctrl+c copies the selection either way, and so does cmd+c wherever '
+        'the terminal forwards it.',
+        'copy-on-mark'),
     'agents_md_names': (
         'Project instruction files',
         'Also read CLAUDE.md and friends. AGENTS.md keeps priority; one file per directory.', 'agents-md'),
     'read_line_numbers': (
-        'Line numbers in Read',
-        'Off saves tokens on every read, and costs the model the ability to cite a line.', 'line-numbers'),
+        'Hide line numbers',
+        'Removes the number column from every Read the model gets — range and '
+        'tail reads included; they all pass through the one line this patch '
+        'rewrites. Costs the model the ability to cite a line from a Read '
+        'alone. Grep keeps its own numbers.', 'line-numbers'),
     'expanded_by_default': (
         'Expanded by default',
-        'Show thinking blocks and tool output unfolded. Costs screen, not tokens.', 'expanded'),
+        'Show tool output unfolded. Costs screen, not tokens. Thinking blocks '
+        'are the Show Thinking Text switch below.', 'expanded'),
     'read_limits': (
         'Read limits',
-        'How much one Read returns. Higher trades round trips for context.', 'read-limits'),
+        'How many lines one Read returns: 1000 is Kimi\'s own cap. Higher '
+        'trades round trips for context; 5000 also raises the byte cap.',
+        'read-limits'),
     'auto_accept_plan': (
         'Auto-accept plans',
         'Skip the plan approval prompt. A multi-option plan then has no option chosen.', 'auto-accept'),
@@ -770,8 +787,20 @@ PATCH_HELP = {
     'user_message_style': (
         'Your message style',
         'How your own text is drawn. Kimi\'s own is bold.', 'user-message'),
+    'user_message_border_color': (
+        'Your message border colour',
+        'The colour of the frame around your own messages. default follows the '
+        'theme; a #rrggbb value works from the settings file.', 'colors'),
+    'input_box_text_color': (
+        'Inputbox text colour',
+        'The colour of the text you type into the input box. default keeps '
+        'the terminal\'s own.', 'colors'),
+    'input_box_style': (
+        'Inputbox style',
+        'How the text you type is drawn. default is plain, Kimi\'s own.',
+        'colors'),
     'welcome_banner': (
-        'Welcome banner',
+        'New modding banner',
         'Greet with "Welcome to Kimi Code Mods!" and give the logo its horns.',
         'welcome-banner'),
     'fullscreen': (
@@ -780,13 +809,26 @@ PATCH_HELP = {
         'The shell keeps its scrollback; Kimi\'s is gone when it exits.',
         'fullscreen'),
     'input_box_border': (
-        'Composer border',
+        'Inputbox border',
         'The frame around the input box. off leaves the space blank.', 'input-box'),
+    'input_box_prompt': (
+        'Inputbox marker',
+        'The "> " overlaid into the input box. none removes it and lets the '
+        'typed text start at the content edge.', 'input-box-prompt'),
     'cron_drop_dir': (
         'Cron drop directory',
         'Fire JSON files dropped into <sessionDir>/cron/ as one-shot cron '
         'turns. For an external bus daemon; nothing typed reaches the session.',
         'cron-drop'),
+    'context_position': (
+        'Context gauge position',
+        'Where the context percentage sits: the footer\'s second line, or the '
+        'row above the composer next to the tip.', 'context-position'),
+    'steer_mid_turn': (
+        'Prompt Without Queue',
+        'A prompt sent while the model works joins the running turn at the '
+        'next step boundary, instead of queuing for the turn after.',
+        'steer-mid-turn'),
     'agent_background': (
         'Subagents in the background',
         'Run every subagent detached from the turn, so the composer stays '
@@ -797,6 +839,33 @@ PATCH_HELP = {
         'A standing list of subagents under the composer, instead of a tree '
         'that scrolls away. `all` also keeps the ones that just finished.',
         'agent-dock'),
+    'agent_dock_rows': (
+        'Subagent dock rows',
+        'How many agents the dock shows at once. The settings file accepts '
+        'any number from 1 to 20.', 'agent-dock'),
+    'at_file_suggestions': (
+        '@ file suggestions',
+        'Height of the @-file list: Kimi\'s plain five, half the window, or '
+        'nearly full — the two taller ones use the wrapping two-line list '
+        'the slash commands have, paths included.', 'suggestion'),
+    'thinking_display': (
+        'Show Thinking Text',
+        'How much of a thinking block is shown: Kimi\'s two live lines and '
+        'folded end (`compact`), everything live and folded at the end '
+        '(`keep`), or everything live and kept expanded forever (`full`).',
+        'thinking-display'),
+    'bash_one_liner': (
+        'Bash one-liner',
+        'Show the command itself in the tool-call header instead of '
+        '"Ran a command", without the 60-column cut.', 'bash-one-liner'),
+    'tool_call_used': (
+        'Tool call Used/Using',
+        'Kimi prefixes tool-call headers with Used/Using. off drops the word '
+        'and lets the tool name lead.', 'bash-one-liner'),
+    'status_hints': (
+        'Status hints',
+        'The rotating hints in the status line, like the /model reminder. '
+        'off leaves the space quiet.', 'status-hints'),
 }
 
 
@@ -814,15 +883,24 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
                                   'working_mirror']),
     'usermsg': ('User message display', ['user_message_marker',
                                          'user_message_border',
-                                         'user_message_style']),
+                                         'user_message_border_color',
+                                         'user_message_style',
+                                         'input_box_border',
+                                         'input_box_prompt',
+                                         'input_box_text_color',
+                                         'input_box_style']),
+    'output': ('Output', ['read_line_numbers', 'expanded_by_default',
+                          'thinking_display', 'bash_one_liner',
+                          'tool_call_used']),
     'router': ('Complexity effort router', ['effort_router']),
     'agentsmd': ('AGENTS.md alternative names', ['agents_md_names']),
-    'misc': ('Miscellaneous settings', ['suggestion_height', 'wd_command',
-                                        'click_cursor', 'read_line_numbers',
-                                        'expanded_by_default', 'read_limits',
-                                        'auto_accept_plan', 'input_box_border',
-                                        'fullscreen', 'welcome_banner',
-                                        'cron_drop_dir']),
+    'misc': ('General settings', ['fullscreen', 'click_cursor', 'wd_command',
+                                  'auto_accept_plan',
+                                  'copy_on_mark', 'welcome_banner',
+                                  'cron_drop_dir', 'steer_mid_turn',
+                                  'suggestion_height', 'at_file_suggestions',
+                                  'read_limits', 'status_hints',
+                                  'context_position']),
 }
 
 # Patch switches that are drawn on a screen of their own rather than in a
@@ -832,14 +910,19 @@ SETTING_GROUPS: dict[str, tuple[str, list[str]]] = {
 # `config.toml`. Listing it here keeps the selfcheck's real question intact,
 # which is not "is every switch in a group" but "can every switch be reached".
 SETTINGS_ELSEWHERE: dict[str, str] = {
-    'agent_dock': 'Subagent models',
-    'agent_background': 'Subagent models',
+    'agent_dock': 'Subagent',
+    'agent_dock_rows': 'Subagent',
+    'agent_background': 'Subagent',
 }
 
 # tweakcc draws a two-state switch as a checkbox and everything else as its
 # value. Worth copying: a checkbox is read without reading, and a switch with
 # four states cannot be one honestly.
 BOX = {'on': '☑ Enabled', 'off': '☐ Disabled'}
+
+# Switches whose label names the departure from Kimi, not Kimi's own state —
+# the checkbox display inverts for these (see switch_value).
+INVERTED = {'read_line_numbers'}
 
 
 def default_note(value_text) -> str:
@@ -886,12 +969,19 @@ def at_default(*keys: str):
 DEFAULT_MEANS = {
     'user_message_style': 'bold',
     'suggestion_height': 'five',
+    'at_file_suggestions': 'five',
     'read_limits': '1000 lines',
-    'spinner_style': 'braille',
+    'spinner_style': 'Kimi-Default',
     'spinner_interval_ms': '80/120 ms',
     'input_box_border': 'round',
+    'input_box_style': 'plain',
     'spinner_frames': '—',
     'thinking_verbs_list': 'built-in',
+    # The colour switches spell their untouched state `default`, and what
+    # that buys is the theme's own token.
+    'input_box_text_color': 'terminal',
+    'user_message_border_color': 'roleUser',
+    'input_box_prompt': '“> ”',
 }
 
 
@@ -915,7 +1005,15 @@ def switch_value(key: str):
         raw = str(st.settings.get(key, ps.DEFAULTS.get(key, '')))
         if raw == 'default' and key in DEFAULT_MEANS:
             return DEFAULT_MEANS[key]
-        return BOX.get(raw, raw) if two_state else raw
+        if two_state:
+            # A label phrased as the departure ("Hide line numbers") reads
+            # backwards against a plain checkbox: ☑ must mean the hiding is
+            # on, not that Kimi's numbering is. Storage keeps Kimi's
+            # semantics; only the display flips.
+            if key in INVERTED:
+                raw = 'off' if raw == 'on' else 'on'
+            return BOX.get(raw, raw)
+        return raw
     return read
 
 
@@ -935,7 +1033,10 @@ def screen_settings(st: State, group: str) -> m.Screen:
             value = switch_value(key)
             note = value_note(value, at_default(key),
                               (lambda q: lambda x: x.feature_note(q))(patch))
-            if key in ps.CHOICES:
+            if key == 'input_box_text_color':
+                rows.append(Item('action', label, value, note, key=key,
+                                 help=help_text + '  (enter picks a colour)'))
+            elif key in ps.CHOICES:
                 rows.append(Item('cycle', label, value, note,
                                  key=key, choices=ps.CHOICES[key], help=help_text))
             else:
@@ -946,21 +1047,10 @@ def screen_settings(st: State, group: str) -> m.Screen:
                                      x.settings.get(k, ps.DEFAULTS[k])))(key),
                                  on_edit=free_text_edit,
                                  help=help_text + '  (enter types a value)'))
-        # Everything else on the root menu opens a screen of its own. The
-        # fullscreen renderer never did — it was one switch sitting among the
-        # doors — so it belongs here with the other switches. It is the one
-        # row on this screen the patches do not read: `bin/kimi` exports it,
-        # so it takes effect at the next start with no patch run at all.
         if group == 'misc':
-            # Two rows here are not patch switches. Both are settings you
-            # step through rather than doors into a screen, which is what
-            # they have in common with everything else on this list — and
-            # what they did not have in common with the root menu. They go
-            # under a rule of their own, because the line at the top of this
-            # screen does not describe them: neither waits for a patch run.
-            rows.append(Item('sep'))
-            rows.append(Item('info', 'read by Kimi and the launcher, not by a '
-                                     'patch — no patch run needed'))
+            # One row here is not a patch switch: the permission mode is a
+            # config.toml key, read at the next start — its help line says
+            # so, since the banner at the top of this screen does not.
             data = config_summary(s)
             perm = data.get(cfg.K_PERMISSION)
             # The note says `default` where the key is absent, and the help
@@ -974,13 +1064,8 @@ def screen_settings(st: State, group: str) -> m.Screen:
                              on_delete=drop_permission,
                              help='What Kimi does before it runs a tool call: '
                                   + cfg.PERMISSION_HELP.get(perm or 'manual', '')
-                                  + '. Read at the next start; backspace hands '
-                                    'it back to Kimi.'))
-            rows.append(Item('submenu', 'Composer frame colours',
-                             lambda x: 'border, borderFocus',
-                             key='colors:border,borderFocus',
-                             help='The frame the composer border setting draws '
-                                  'is coloured by these two palette tokens.'))
+                                  + '. Read by Kimi at the next start, not by '
+                                    'a patch; backspace hands it back.'))
         rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
@@ -991,8 +1076,10 @@ def screen_settings(st: State, group: str) -> m.Screen:
     def act(s: State, item: Item) -> bool:
         if item.key == 'back':
             return False
-        if item.key.startswith('colors:'):
-            open_colors(item.key[7:].split(','), 'Composer frame colours')
+        if item.key == 'input_box_text_color':
+            pick_setting_color(s, item.key,
+                               PATCH_HELP[item.key][0],
+                               PATCH_HELP[item.key][1])
             return True
         return True
 
@@ -1002,6 +1089,8 @@ def screen_settings(st: State, group: str) -> m.Screen:
     def cyc(s: State, item: Item, forward: bool) -> None:
         if item.key == 'fullscreen':
             cycle_item(s, item, forward)
+        elif item.key == 'input_box_text_color':
+            return
         elif item.key == 'permission':
             modes = cfg.PERMISSION_MODES
             now = (config_summary(s).get(cfg.K_PERMISSION)
@@ -1025,6 +1114,26 @@ def open_colors(tokens: list[str], title: str) -> None:
     """
     screen, state = themes.screen_colors(tokens, title)
     m.loop(screen, state)
+
+
+def pick_setting_color(s: State, key: str, title: str, what: str) -> None:
+    """The colour picker for a patch setting rather than a theme token.
+
+    `m.color` is the same three-bar picker the theme editor uses; the only
+    difference is where the answer is written — into `patch-settings.conf`
+    for the patch to bake into the binary, not into a theme file. A cancelled
+    pick leaves the setting alone; `default` stays the word for "the theme
+    decides".
+    """
+    current = str(ps.get(key))
+    if current == 'default':
+        current = '#808080'
+    raw = m.color(title, current, hint=what + ' #rrggbb, or "default".')
+    if not raw:
+        return
+    raw = raw.strip().lower()
+    if raw == 'default' or themes.valid_color(raw) == '':
+        ps.set_value(key, raw, s.settings_path)
 
 
 def patch_list(patch: Path | None, name: str) -> list[str]:
@@ -1062,9 +1171,22 @@ def patch_table(patch: Path | None, name: str) -> dict[str, list[str]]:
     if not match:
         return {}
     out = {}
-    for key, body in re.findall(r'(\w+):\s*\[([^\]]*)\]', match.group(1)):
+    # The key may be quoted: a preset whose name carries a hyphen
+    # (`'kimi-code-mods'`) is not a bare identifier, and a `\w+` pattern
+    # skipped it silently — the row then showed no frames and the style fell
+    # back to braille, which is how the default set went missing from the menu.
+    for key, body in re.findall(r"'?([\w-]+)'?:\s*\[([^\]]*)\]", match.group(1)):
         out[key] = re.findall(r"'([^']*)'", body)
     return out
+
+
+# The names the two style screens show. The stored value stays what the patch
+# reads; only the row label differs, so the list reads as names rather than as
+# settings keys.
+STYLE_LABELS = {
+    'kimi-code-mods': 'Kimi-Code-Mods',
+    'default': 'Kimi Default',
+}
 
 
 def spinner_frames(st: State) -> list[str]:
@@ -1226,7 +1348,7 @@ def screen_working_style(st: State) -> m.Screen:
                 shown = '—' if raw in ('', 'default') else ' '.join(working_frames(s)[:10])
             else:
                 shown = ' '.join(presets.get(name, []))
-            rows.append(Item('action', name,
+            rows.append(Item('action', STYLE_LABELS.get(name, name),
                              (lambda tx, on: lambda x: ('● ' if on else '○ ') + tx)(
                                  shown, name == current),
                              note if name == current else (lambda x: ''),
@@ -1319,7 +1441,7 @@ def screen_thinking_style(st: State) -> m.Screen:
                 shown = '—' if raw in ('', 'default') else ' '.join(spinner_frames(s)[:10])
             else:
                 shown = ' '.join(presets.get(name, []))
-            rows.append(Item('action', name,
+            rows.append(Item('action', STYLE_LABELS.get(name, name),
                              (lambda t, on: lambda x: ('● ' if on else '○ ') + t)(
                                  shown, name == current),
                              note if name == current else (lambda x: ''),
@@ -1529,6 +1651,19 @@ STYLE_SGR = {'default': '\x1b[1m', 'plain': '', 'italic': '\x1b[3m',
              'dim': '\x1b[2m', 'underline': '\x1b[4m',
              'strikethrough': '\x1b[9m'}
 
+# The named colours the colour settings cycle through, as escape codes, so a
+# preview can draw what the setting says. `default` is not here on purpose:
+# it draws nothing, which is what it means. A #rrggbb value goes through
+# `themes.rgb` instead.
+COLOR_SGR = {'red': '\x1b[31m', 'green': '\x1b[32m', 'yellow': '\x1b[33m',
+             'blue': '\x1b[34m', 'magenta': '\x1b[35m', 'cyan': '\x1b[36m',
+             'white': '\x1b[37m', 'gray': '\x1b[90m'}
+
+
+def color_sgr(raw: str) -> str:
+    """The escape code for a colour setting, '' for `default` or junk."""
+    return COLOR_SGR.get(raw) or themes.rgb(raw)
+
 
 # What Kimi puts in front of your own messages when nothing says otherwise.
 # The trailing space is part of it, which is why the patch adds one to any
@@ -1597,6 +1732,30 @@ def marker_setting(typed):
     return 'default' if value == KIMI_MARKER else value
 
 
+# The palette token each patch colour stands in for — shown beside a changed
+# value, so the row still says what Kimi would draw without it.
+BASE_PALETTE = {'user_message_border_color': 'roleUser',
+                'input_box_text_color': 'text'}
+
+
+def _paint(sgr: str, s: str) -> str:
+    return f'{sgr}{s}\x1b[0m' if sgr else s
+
+
+def _panel(lines: list[str], title: str) -> list[str]:
+    """The aside in its own frame, the title riding the top edge.
+
+    Starts two rows down — flush with the first row read as glued to the
+    screen's own title line. (Named `_panel`: `_preview_box` is the spinner
+    previews' one-line box.)
+    """
+    w = max((m.visible(l) for l in lines), default=0)
+    head = f'─ {title} '
+    top = '╭' + head + '─' * max(0, w - len(head)) + '╮'
+    body = ['│' + l + ' ' * (w - m.visible(l)) + '│' for l in lines]
+    return ['', '', top] + body + ['╰' + '─' * w + '╯']
+
+
 def user_message_preview(st: State, sel=None) -> list[str]:
     """Your own message drawn twice: as Kimi does it, and as you asked for it."""
     marker = st.settings.get('user_message_marker', 'default')
@@ -1609,41 +1768,112 @@ def user_message_preview(st: State, sel=None) -> list[str]:
          (marker if marker.endswith(' ') else marker + ' '))
     sgr = STYLE_SGR.get(style, '')
     body = f'{prefix}{sgr}{text}\x1b[0m' if sgr else f'{prefix}{text}'
+    fsgr = color_sgr(str(st.settings.get('user_message_border_color', 'default')))
 
-    out = ['', ' Preview', '', '  Kimi\'s own:', '',
-           f'    {KIMI_MARKER} \x1b[1m{text}\x1b[0m',
-           '', '  Yours:', '']
+    inner = [' Default Message:', '',
+             f'   {KIMI_MARKER} \x1b[1m{text}\x1b[0m',
+             '', ' Your Message:', '']
     if border == 'off':
-        out.append('    ' + body)
+        inner.append('   ' + body)
     else:
         tl, tr, bl, br, h, v = USER_FRAMES[border]
         width = m.visible(body) + 2
         if border == 'topbottom':
-            out += ['    ' + h * width, '    ' + body, '    ' + h * width]
+            inner += ['   ' + _paint(fsgr, h * width), '   ' + body,
+                      '   ' + _paint(fsgr, h * width)]
         else:
-            out += ['    ' + tl + h * width + tr,
-                    '    ' + v + ' ' + body + ' ' + v,
-                    '    ' + bl + h * width + br]
-    out += ['', '  ● The directory holds 123 files.']
-    return out
+            inner += ['   ' + _paint(fsgr, tl + h * width + tr),
+                      '   ' + _paint(fsgr, v) + ' ' + body + ' ' + _paint(fsgr, v),
+                      '   ' + _paint(fsgr, bl + h * width + br)]
+    inner += ['', '  ● The directory holds 123 files.']
+    return _panel(inner + input_box_preview(st), 'Preview')
+
+
+def _input_box_lines(border: str, prompt: str, sgr: str) -> list[str]:
+    """One inputbox, three lines high (or one with the border off)."""
+    text = _paint(sgr, 'list the dir')
+    body = ('' if prompt == 'none' else '> ') + text
+    if border == 'off':
+        return ['   ' + body]
+    tl, tr, bl, br, h, v = USER_FRAMES[border]
+    pad = ' ' * max(0, 20 - m.visible(body))
+    if border == 'topbottom':
+        # Same three lines the framed box would take, corners and sides
+        # blanked — the misaligned middle row this replaces read as two
+        # different boxes stacked, not one.
+        return ['   ' + h * 24, '   ' + ' ' + body + pad + ' ', '   ' + h * 24]
+    return ['   ' + tl + h * 22 + tr,
+            '   ' + v + ' ' + body + pad + ' ' + v,
+            '   ' + bl + h * 22 + br]
+
+
+def input_box_preview(st: State) -> list[str]:
+    """The inputbox twice: Kimi's own look, then as configured.
+
+    The frame's colour is deliberately absent: it is the theme's `border` /
+    `borderFocus` tokens now, and a preview that guessed them would disagree
+    with the palette screen the moment either moved.
+    """
+    border = str(st.settings.get('input_box_border', 'default'))
+    prompt = str(st.settings.get('input_box_prompt', 'default'))
+    style = str(st.settings.get('input_box_style', 'default'))
+    sgr = color_sgr(str(st.settings.get('input_box_text_color', 'default'))) \
+        + ('' if style in ('default', 'plain') else STYLE_SGR.get(style, ''))
+    return (['', ' Default Inputbox:', '']
+            + _input_box_lines('round', 'default', '')
+            + ['', ' Inputbox:', '']
+            + _input_box_lines('round' if border in ('', 'default') else border,
+                               prompt, sgr))
 
 
 def screen_user_message(st: State) -> m.Screen:
-    """The marker, the frame and the styling of your own messages."""
-    keys = SETTING_GROUPS['usermsg'][1]
+    """Your own messages and the inputbox — marker, frame, colour, style."""
+    # Row order is the user's spec: the message group first, its palette door
+    # among the switches, then the inputbox group the same way.
+    ROWS = ['user_message_marker', 'user_message_border',
+            'user_message_border_color', 'colors:roleUser',
+            'user_message_style', 'sep',
+            'input_box_prompt', 'input_box_border',
+            'colors:border,borderFocus', 'input_box_text_color',
+            'input_box_style']
+    COLOR_DOORS = {
+        'colors:roleUser': (
+            'Your message text colour', 'roleUser',
+            'Every colour in Kimi comes from the palette; this opens the '
+            'token your own messages are drawn in.'),
+        'colors:border,borderFocus': (
+            'Inputbox border colours', 'border, borderFocus',
+            'The frame the inputbox border setting draws is coloured by '
+            'these two palette tokens.'),
+    }
 
     def build(s: State) -> list[Item]:
         live = (lambda q: lambda x: x.feature_note(q))(s.patch_file('user-message'))
         rows = [Item('info', 'read while the patches are applied — '
                              'a change here needs a patch run'),
-                Item('info', 'the colour is the `roleUser` token in your theme, '
-                             'not a setting here'),
                 Item('sep')]
-        for key in keys:
+        for key in ROWS:
+            if key == 'sep':
+                rows.append(Item('sep'))
+                continue
+            if key in COLOR_DOORS:
+                label, tokens, help_text = COLOR_DOORS[key]
+                rows.append(Item('submenu', label, lambda x, t=tokens: t,
+                                 key=key, help=help_text))
+                continue
             label, help_text, _ = PATCH_HELP[key]
             value = marker_value if key == 'user_message_marker' else switch_value(key)
             note = value_note(value, at_default(key), live)
-            if key in ps.CHOICES:
+            if key in BASE_PALETTE:
+                def note(st, k=key, v=value, lv=live):
+                    if at_default(k)(st):
+                        return 'default'
+                    # Changed: the palette token the colour oversteuert.
+                    return NO_PATCH if lv(st) == NO_PATCH \
+                        else BASE_PALETTE[k]
+                rows.append(Item('action', label, value, note, key=key,
+                                 help=help_text + '  (enter picks a colour)'))
+            elif key in ps.CHOICES:
                 rows.append(Item('cycle', label, value, note, key=key,
                                  choices=ps.CHOICES[key], help=help_text))
             else:
@@ -1653,12 +1883,7 @@ def screen_user_message(st: State) -> m.Screen:
                                  on_edit=edit_marker,
                                  help=help_text + '  (enter types one, empty '
                                                   'means no marker at all)'))
-        rows += [Item('sep'),
-                 Item('submenu', 'Colours', lambda x: 'roleUser in your theme',
-                      key='colors:roleUser',
-                      help='Every colour in Kimi comes from the palette; this '
-                           'opens the token your own messages are drawn in.'),
-                 Item('action', 'Back', lambda x: '', key='back')]
+        rows += [Item('sep'), Item('action', 'Back', lambda x: '', key='back')]
         return rows
 
     def restore(s: State, item: Item) -> None:
@@ -1673,11 +1898,17 @@ def screen_user_message(st: State) -> m.Screen:
         if item.key == 'back':
             return False
         if item.key.startswith('colors:'):
-            open_colors(item.key[7:].split(','), 'Your message colour')
+            open_colors(item.key[7:].split(','), item.label)
+            return True
+        if item.key in BASE_PALETTE:
+            pick_setting_color(s, item.key, PATCH_HELP[item.key][0],
+                               PATCH_HELP[item.key][1])
             return True
         return True
 
     def cyc(s: State, item: Item, forward: bool) -> None:
+        if item.key in BASE_PALETTE:
+            return
         if item.key in ps.CHOICES:
             ps.cycle(item.key, forward, s.settings_path)
 
@@ -1974,7 +2205,7 @@ def _selfcheck() -> int:
         # digits still work as a shortcut
         pos5, _, _ = handle(st, items, start, '3')
         check('digit shortcut selects the third row',
-              items[pos5].label == 'Thinking style', items[pos5].label)
+              items[pos5].label == 'Thinking verbs', items[pos5].label)
 
         # q and friends leave
         for key in ('q', 'esc', 'ctrl-c', 'eof'):
@@ -2075,8 +2306,8 @@ def _selfcheck() -> int:
 
         # `expanded_by_default` has no patch in this sandbox, so once it is
         # moved off its default there is something worth saying about it.
-        ps.set_value('expanded_by_default', 'both', settings)
-        misc1 = screen_settings(state(), 'misc')
+        ps.set_value('expanded_by_default', 'on', settings)
+        misc1 = screen_settings(state(), 'output')
         sw = '\n'.join(m.render(misc1, state(), misc1.build(state()), 0))
         check('a changed switch reports its patch instead',
               'patch not installed' in sw, sw[:700])
@@ -2334,15 +2565,17 @@ def _selfcheck() -> int:
         # cannot work however it is set, which is different in kind from one
         # that has not been applied yet.
         ps.set_value('read_line_numbers', 'off', settings)
-        misc2 = screen_settings(state(), 'misc')
+        misc2 = screen_settings(state(), 'output')
         notes = {r.key: r.note(state()) for r in misc2.build(state()) if r.selectable}
         check('a changed row with no patch behind it still says so',
               notes.get('read_line_numbers') == NO_PATCH, notes)
-        # `read_limits` used to *show* the word `default`, which named the
-        # fact that nothing was changed twice while saying nothing about what
-        # Kimi does. It shows what Kimi does now, so the note carries the
-        # other half.
-        misc_rows = {r.key: r for r in misc2.build(state()) if r.selectable}
+        # `suggestion_height` used to *show* the word `default`, which named
+        # the fact that nothing was changed twice while saying nothing about
+        # what Kimi does. It shows what Kimi does now, so the note carries
+        # the other half.
+        misc_rows = {r.key: r
+                     for r in screen_settings(state(), 'misc').build(state())
+                     if r.selectable}
         # Every switch that is untouched has to say so, whatever word its
         # value happens to show. The two that got this wrong showed what Kimi
         # does — `80/120 ms`, `—` — while the note looked at the stored word
@@ -2359,10 +2592,11 @@ def _selfcheck() -> int:
                   not silent, silent)
 
         check('a value that spelled itself `default` now says what Kimi does',
-              misc_rows['read_limits'].value(state()) == DEFAULT_MEANS['read_limits'],
-              misc_rows['read_limits'].value(state()))
+              misc_rows['suggestion_height'].value(state()) == DEFAULT_MEANS['suggestion_height'],
+              misc_rows['suggestion_height'].value(state()))
         check('and the note carries the other half',
-              notes.get('read_limits') == 'default', notes)
+              misc_rows['suggestion_height'].note(state()) == 'default',
+              misc_rows['suggestion_height'].note(state()))
         check('nothing anywhere still says it is waiting',
               'waiting' not in ' '.join(
                   str(r.note(state())) for g in SETTING_GROUPS
@@ -2458,8 +2692,14 @@ def _selfcheck() -> int:
         # slot, and the screen hands `menu.render` the sequence to cycle
         # through it. Both halves are checked: the sequence follows the
         # setting, and the preview is one line with one slot in it.
-        check('the spinner preview falls back to Kimi\'s own frames',
-              '⠋' in spinner_frames(st), spinner_frames(st)[:4])
+        # An empty settings file means the registered default, which is the
+        # `kimi-code-mods` preset — and its name carries hyphens, so this also
+        # covers the parser reading a quoted key out of the patch. It once did
+        # not, and the row silently fell back to Kimi's braille set.
+        check('the spinner preview shows the registered default\'s frames',
+              spinner_frames(st) == patch_table(st.patch_file('spinner'),
+                                                'PRESETS')['kimi-code-mods'],
+              spinner_frames(st)[:4])
         check('and shows them on a single animated line',
               sum(m.SPIN_SLOT in ln for ln in spinner_preview(st)) == 1,
               spinner_preview(st))
@@ -2510,7 +2750,7 @@ def _selfcheck() -> int:
         ps.set_value('user_message_border', 'double', settings)
         pv = '\n'.join(user_message_preview(state()))
         check('the message preview draws the chosen frame', '╔' in pv and '╚' in pv, pv)
-        check('and still shows what Kimi does', 'Kimi\'s own' in pv)
+        check('and still shows what Kimi does', 'Default Message' in pv)
         # The marker row shows the character rather than the word: what you
         # want to know is what will be sitting in front of your messages.
         ps.set_value('user_message_marker', 'default', settings)

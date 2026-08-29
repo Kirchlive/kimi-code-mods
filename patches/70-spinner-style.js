@@ -80,7 +80,7 @@
 const STYLE = String(settings.get('spinner_style', 'default')).toLowerCase();
 const RATE = String(settings.get('spinner_interval_ms', 'default')).toLowerCase();
 const FRAMES_SETTING = String(settings.get('spinner_frames', 'default'));
-const MIRROR = String(settings.get('spinner_mirror', 'off')).toLowerCase();
+const MIRROR = String(settings.get('spinner_mirror', 'on')).toLowerCase();
 
 // The working spinner: the one Kimi turns while it waits on the model or on a
 // tool. `follow` means "whatever the thinking spinner is", which is what this
@@ -88,7 +88,7 @@ const MIRROR = String(settings.get('spinner_mirror', 'off')).toLowerCase();
 // file written back then still means what it meant.
 const W_STYLE = String(settings.get('working_style', 'follow')).toLowerCase();
 const W_FRAMES_SETTING = String(settings.get('working_frames', 'default'));
-const W_MIRROR = String(settings.get('working_mirror', 'off')).toLowerCase();
+const W_MIRROR = String(settings.get('working_mirror', 'on')).toLowerCase();
 
 for (const [name, value] of [['spinner_mirror', MIRROR], ['working_mirror', W_MIRROR]]) {
   if (!['on', 'off'].includes(value)) {
@@ -103,7 +103,10 @@ const PRESETS = {
   blocks: ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'],
   wave: ['▁', '▃', '▄', '▅', '▆', '▇', '█', '▇', '▆', '▅', '▄', '▃'],
   glow: ['░', '▒', '▓', '█', '▓', '▒'],
-  colors: ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣'],
+  'kimi-code-mods': ['🔵', '🟢', '🟡', '🟠', '🔴'],
+  // Legacy name for the kimi-code-mods set — kept parseable so a settings
+  // file from before the rename still means the same five frames.
+  colors: ['🔵', '🟢', '🟡', '🟠', '🔴'],
   arc: ['◜', '◠', '◝', '◞', '◡', '◟'],
   star: ['·', '✢', '✳', '✶', '✻', '✽'],
 };
@@ -157,12 +160,9 @@ if (RATE !== 'default') {
   }
 }
 
-// Nothing asked for: every channel on Kimi's own frames, no mirror, no rate.
-// `follow` counts as nothing only while the thinking spinner is also untouched.
-const wantsWorking = !(W_STYLE === 'follow' || W_STYLE === 'default') || W_MIRROR === 'on';
-if (STYLE === 'default' && ms === null && MIRROR === 'off' && !wantsWorking) {
-  throw new Error('already patched');
-}
+// No early "nothing asked for" guard: the left margin below is fixed whatever
+// the settings say, so only the `out === js` check at the end can tell a second
+// run from a first.
 
 let out = js;
 
@@ -253,6 +253,27 @@ if (ms !== null) {
     }
     out = out.replace(ANCHOR, () => DONE);
   }
+}
+
+// -------------------------------------------------------- 3. the left margin
+
+// `MoonLoader extends Text` and asks for `paddingX = 1`, so `Text.render`
+// prefixes every line of the indicator with one space — the thinking and the
+// working line both sit one column further in than the transcript above them.
+// Zero puts them back on the same left edge. The literal is unique in the
+// bundle; the patched form does not occur in it at all, which is what tells a
+// second run apart from a first here.
+const MARGIN_DONE = 'super("", 0, 0);';
+if (!out.includes(MARGIN_DONE)) {
+  const ANCHOR = 'super("", 1, 0);';
+  const hits = out.split(ANCHOR).length - 1;
+  if (hits === 0) {
+    throw new Error('the MoonLoader padding not found - the shape changed this release');
+  }
+  if (hits !== 1) {
+    throw new Error(`the MoonLoader padding is not unique (${hits}) - refusing to guess`);
+  }
+  out = out.replace(ANCHOR, () => MARGIN_DONE);
 }
 
 if (out === js) {

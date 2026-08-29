@@ -62,6 +62,13 @@ test suite does exactly this).
   menu group reachable from the root menu — both are checked.
 - A patch owning a setting should also add a case to the patch runner's
   self-check (`lib/test_patches.mjs`).
+- A patch that also exports a **table** for the menu (`PRESETS` in
+  `patches/70-spinner-style.js`) is parsed out of the patch source by
+  `patch_table()` in `lib/main-menu.py` — a regex, not a JS parser. It must
+  tolerate a **quoted** key: `'kimi-code-mods'` is not a bare identifier, and
+  a key it fails to match is skipped silently, which shows up as an empty row
+  and a fallback value rather than as an error. Guard such a table with a
+  selfcheck that compares the menu's parse against the patch's own entry.
 
 ### Minified-JS traps (all cost real time here)
 
@@ -70,6 +77,12 @@ test suite does exactly this).
   to `.replace()`.
 - Function bodies span lines: don't search line-by-line; read whole file and
   use `indexOf`, or slice the `//#region` block first.
+- `toolCall.args[...]` is **empty until the argument finished streaming**:
+  during the deltas `args` comes from `parseStreamingArgs`, whose fallback
+  regex needs the value's closing quote. Anything drawn live from it appears
+  late by exactly the argument's token time. Read
+  `extractPartialStringField(toolCall.streamingArguments, key)` instead — it
+  walks an unterminated JSON string.
 - **Two engine generations exist side by side** (`packages/agent-core-v2` is
   live, `agent-core` mostly dead except shared modules like the ripgrep
   locator). Minified twins differ by `$1`/`$2` suffixes; check the `//#region`
