@@ -337,7 +337,7 @@ again, or set `KIMI_CLI_NO_AUTO_UPDATE=1` to stop the updates.
 Kimi moved that text in a release, so the override is skipped rather than
 forced over the new wording. Nothing is lost. Re-extract with
 `kimi-patch.sh --extract-prompts` and carry your change across with
-`--migrate`, which does the three-way merge for you. See
+`--migrate`, which does the three-way merge for you.
 [docs/internals.md](docs/internals.md).
 
 </details>
