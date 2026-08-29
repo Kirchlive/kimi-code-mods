@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="Welcome to Kimi Code Mods!" width="880">
 
 # kimi-code-mods
 
